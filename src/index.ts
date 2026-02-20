@@ -3,6 +3,7 @@ import { startSignalListener, sendSignalMessage } from './signal.js';
 import { runAgentLoop } from './agent.js';
 import { initDb, saveMessage } from './db.js';
 import { GeminiCLIProvider } from './llm/gemini-cli-provider.js';
+import { GeminiAPIProvider } from './llm/gemini-api-provider.js';
 
 // Load environment variables
 dotenv.config();
@@ -19,8 +20,10 @@ async function main() {
     console.log("Starting Tars Level 4: Modular Architecture...");
     initDb();
 
-    // Default provider for now. In the future, this can be selected via .env
-    const provider = new GeminiCLIProvider();
+    const providerConfig = process.env.LLM_PROVIDER || 'gemini-cli';
+    const provider = providerConfig === 'gemini-api'
+        ? new GeminiAPIProvider(process.env.GEMINI_API_KEY, process.env.GEMINI_API_MODEL)
+        : new GeminiCLIProvider();
 
     await startSignalListener(
         BOT_SIGNAL_NUMBER!,

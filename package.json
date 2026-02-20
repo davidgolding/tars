@@ -9,9 +9,13 @@
         "start": "node dist/index.js"
     },
     "dependencies": {
+        "@google/genai": "^1.42.0",
+        "@inquirer/prompts": "^8.2.1",
         "better-sqlite3": "^12.6.2",
+        "chalk": "^5.6.2",
         "dotenv": "^16.4.5",
-        "signal-cli": "^0.13.19"
+        "signal-cli": "^0.13.19",
+        "zod": "^4.3.6"
     },
     "devDependencies": {
         "@types/better-sqlite3": "^7.6.13",

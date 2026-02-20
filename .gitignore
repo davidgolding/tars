@@ -5,3 +5,4 @@ tars.db-wal
 pnpm-lock.yaml
 .env
 .DS_Store
+/dist
