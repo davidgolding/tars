@@ -1,0 +1,7 @@
+node_modules/
+tars.db
+tars.db-shm
+tars.db-wal
+pnpm-lock.yaml
+.env
+.DS_Store

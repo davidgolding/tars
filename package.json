@@ -1,0 +1,22 @@
+{
+    "name": "tars",
+    "version": "1.0.0",
+    "description": "A lean, secure, local-first AI agent using Signal and Gemini",
+    "type": "module",
+    "scripts": {
+        "dev": "tsx src/index.ts",
+        "build": "tsc",
+        "start": "node dist/index.js"
+    },
+    "dependencies": {
+        "better-sqlite3": "^12.6.2",
+        "dotenv": "^16.4.5",
+        "signal-cli": "^0.13.19"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/node": "^20.12.7",
+        "tsx": "^4.7.2",
+        "typescript": "^5.4.5"
+    }
+}
