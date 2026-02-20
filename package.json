@@ -6,7 +6,11 @@
     "scripts": {
         "dev": "tsx src/index.ts",
         "build": "tsc",
-        "start": "node dist/index.js"
+        "start": "node dist/index.js",
+        "setup": "tsx src/setup.ts",
+        "daemon:start": "launchctl load ~/Library/LaunchAgents/com.davidgolding.tars.plist",
+        "daemon:stop": "launchctl unload ~/Library/LaunchAgents/com.davidgolding.tars.plist",
+        "daemon:restart": "pnpm run daemon:stop && pnpm run build && pnpm run daemon:start"
     },
     "dependencies": {
         "@google/genai": "^1.42.0",
