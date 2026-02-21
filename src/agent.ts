@@ -2,7 +2,7 @@ import { getCurrentTime } from './tools/time.js';
 import { storeMemoryTool, searchMemoryTool } from './tools/memory.js';
 import { readFileTool, writeFileTool, listFilesTool } from './tools/fs.js';
 import { webSearchTool } from './tools/search.js';
-import { getSettingTool, updateSettingTool } from './tools/setting.ts';
+import { getSettingTool, updateSettingTool } from './tools/setting.js';
 import { listContextCategoriesTool, readContextTool, updateContextTool, deleteContextTool } from './tools/context.js';
 import { getRecentMessages, getAgentContext, getAllAgentContextCategories, getSetting } from './db.js';
 import { MCPClient } from './mcp.js';
@@ -13,7 +13,7 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
-const MAX_ITERATIONS = process.env.LLM_MAX_ITERATIONS;
+const MAX_ITERATIONS = parseInt(process.env.LLM_MAX_ITERATIONS || '35', 35);
 
 // Global MCP client instance (optional)
 let mcpClient: MCPClient | null = null;

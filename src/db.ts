@@ -8,10 +8,6 @@ const dbPath = join(__dirname, '../tars.db');
 
 const db = new Database(dbPath);
 
-const config = [
-  { "bootstrapped": false },
-];
-
 // Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
 
@@ -55,6 +51,12 @@ export function initDb() {
     )
   `);
 
+  // Initial settings
+  db.exec(`
+    INSERT INTO settings (key, value) VALUES ("bootstrapped", "false")
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `);
+
   // Seeding logic for Agent Context
   const countStmt = db.prepare('SELECT COUNT(*) as count FROM agent_context');
   const { count } = countStmt.get() as { count: number };
@@ -85,15 +87,6 @@ export function initDb() {
       console.warn('[DB] Could not find agent/ directory to seed context.');
     }
   }
-
-  const insertSetting = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-  const saveConfig = db.transaction((cfg: Record<string, any>) => {
-    for (const [key, value] of Object.entries(cfg)) {
-      insertSetting.run(key, String(value));
-    }
-  });
-  saveConfig(config);
-
   console.log('[DB] Database initialized at', dbPath);
 }
 

@@ -13,6 +13,9 @@ try {
     // Clear out the seeded agent persona
     db.exec('DELETE FROM agent_context;');
 
+    // Clear out the settings
+    db.exec('DELETE FROM settings;');
+
     console.log(chalk.yellow('[System] Short-term memory, long-term RAM, and Persona instructions purged.'));
 
     // Re-seed the persona from the agent/ templates
