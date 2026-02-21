@@ -35,8 +35,9 @@ async function ensureMCP() {
 }
 
 function getSystemPrompt(): string {
-    const isBootstrapped = getSetting('bootstrapped') === 'true';
-    let prompt = `### STRICT IDENTITY ###\nYou are an AI agent operating within a secure wrapper. NEVER set the 'bootstrapped' setting to false; that is only performed by the system.\n\n`;
+    const bootstrapVal = getSetting('bootstrapped');
+    const isBootstrapped = bootstrapVal ? !isNaN(new Date(bootstrapVal).getTime()) && new Date(bootstrapVal) <= new Date() : false;
+    let prompt = `### STRICT IDENTITY ###\nYou are an AI agent operating within a secure wrapper. NEVER modify the 'bootstrapped' setting once it contains a timestamp; that is only performed by the system.\n\n`;
     const toolProtocol = `### TOOL PROTOCOL ###
 You can use tools. To use a tool, output exactly this format:
 <TOOL_CALL>
@@ -81,7 +82,7 @@ If you need to use a tool, output ONLY the tool calls. Do not include conversati
         - USER - User's name, how to address them, notes
         - SOUL - Talk together about what matters to the user, how they want you to behave, any boundaries or preferences
 
-        **When You're Done** use update_setting to switch "bootstrapped" to "true". Notify the user you are at their service.
+        **When You're Done**: Use update_setting to record the current time in 'bootstrapped'. Notify the user you are at their service.
         `;
         return prompt;
     } else {

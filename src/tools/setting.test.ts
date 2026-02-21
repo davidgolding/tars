@@ -12,15 +12,29 @@ describe('updateSettingTool', () => {
         vi.clearAllMocks();
     });
 
-    it('should allow setting bootstrapped to true', () => {
-        const result = updateSettingTool('bootstrapped', 'true');
+    it('should allow setting bootstrapped to a valid timestamp if not already set', () => {
+        vi.mocked(db.getSetting).mockReturnValue(null); // Not set
+        const validTime = new Date().toISOString();
+        const result = updateSettingTool('bootstrapped', validTime);
         expect(result).toEqual({ success: true, message: 'Updated setting: bootstrapped' });
-        expect(db.updateSetting).toHaveBeenCalledWith('bootstrapped', 'true');
+        expect(db.updateSetting).toHaveBeenCalledWith('bootstrapped', validTime);
     });
 
-    it('should block setting bootstrapped to false', () => {
-        const result = updateSettingTool('bootstrapped', 'false');
-        expect(result).toEqual({ error: 'System policy strictly prohibits setting bootstrapped back to false via tools.' });
+    it('should block setting bootstrapped to a boolean or invalid string', () => {
+        vi.mocked(db.getSetting).mockReturnValue(null);
+        const result = updateSettingTool('bootstrapped', 'true');
+        expect(result).toEqual({ error: 'System policy strictly prohibits setting bootstrapped to anything other than a valid ISO timestamp.' });
+        expect(db.updateSetting).not.toHaveBeenCalled();
+    });
+
+    it('should block modifying bootstrapped if it is already a valid timestamp', () => {
+        const existingTime = new Date('2025-01-01T00:00:00Z').toISOString();
+        vi.mocked(db.getSetting).mockReturnValue(existingTime); // Already set
+
+        const newTime = new Date().toISOString();
+        const result = updateSettingTool('bootstrapped', newTime);
+
+        expect(result).toEqual({ error: 'System policy strictly prohibits modifying the bootstrapped timestamp once it is set.' });
         expect(db.updateSetting).not.toHaveBeenCalled();
     });
 

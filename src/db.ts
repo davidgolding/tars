@@ -52,9 +52,9 @@ export function initDb() {
   `);
 
   // Initial settings
+  // Ensure bootstrapped is unset if it was the legacy 'false' value
   db.exec(`
-    INSERT INTO settings (key, value) VALUES ('bootstrapped', 'false')
-    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+    DELETE FROM settings WHERE key = 'bootstrapped' AND value = 'false'
   `);
 
   // Seeding logic for Agent Context
