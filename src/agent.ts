@@ -119,6 +119,9 @@ export async function runAgentLoop(userMessage: string, provider: LLMProvider): 
     let promptContext = `${getSystemPrompt()}\n\n### CONVERSATION HISTORY ###\n${historyText}\n\nTars: `;
     const isVerbose = process.env.VERBOSE === 'true';
 
+    // Circuit Breakers
+    let consecutiveSearches = 0;
+
     for (let i = 0; i < MAX_ITERATIONS; i++) {
         if (isVerbose) {
             console.log(`\n\x1b[36m=== [Iter ${i + 1}] LLM Prompt Segment ===\x1b[0m\n${promptContext.substring(promptContext.length - 1000)}\n\x1b[36m==============================\x1b[0m`);
@@ -147,6 +150,7 @@ export async function runAgentLoop(userMessage: string, provider: LLMProvider): 
 
         if (toolCalls.length > 0) {
             let allToolResultsStr = '';
+            let hasSearch = false;
 
             for (const match of toolCalls) {
                 const toolJson = match[1];
@@ -156,7 +160,20 @@ export async function runAgentLoop(userMessage: string, provider: LLMProvider): 
                     const parsed = JSON.parse(toolJson);
                     console.log(`[Agent] Executing tool: ${parsed.tool}`);
 
-                    if (parsed.tool === 'get_current_time') {
+                    if (parsed.tool === 'web_search') {
+                        hasSearch = true;
+                        consecutiveSearches++;
+
+                        // Circuit breaker: Force a hard stop to infinite spinning
+                        if (consecutiveSearches >= 3) {
+                            toolResultStr = JSON.stringify({
+                                error: "CIRCUIT BREAKER ENGAGED. Search backend appears broken or query is impossible.",
+                                system_directive: "STOP SEARCHING IMMEDIATELY. Apologize to the user and state that you cannot search for this right now due to backend failures."
+                            });
+                        } else {
+                            toolResultStr = JSON.stringify(await webSearchTool(parsed.parameters.query));
+                        }
+                    } else if (parsed.tool === 'get_current_time') {
                         toolResultStr = JSON.stringify(getCurrentTime());
                     } else if (parsed.tool === 'save_memory') {
                         toolResultStr = JSON.stringify(storeMemoryTool(parsed.parameters.content, parsed.parameters.category));

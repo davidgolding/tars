@@ -25,7 +25,10 @@ export async function webSearchTool(query: string): Promise<ToolResponse> {
                 .map((topic: any) => topic.text)
                 .join('\n');
         } else {
-            throw new Error(`No results`);
+            return {
+                result: "No information found for this specific query.",
+                system_directive: "DO NOT RETRY WEB SEARCH. Consider if you have enough context to answer without searching, or ask the user for clarification."
+            };
         }
 
         return {
@@ -33,7 +36,8 @@ export async function webSearchTool(query: string): Promise<ToolResponse> {
         };
     } catch (err: any) {
         return {
-            error: `Web search failed: ${err.message}`
+            error: `Web search failed: ${err.message}`,
+            system_directive: "DO NOT RETRY WEB SEARCH. THE UPSTREAM SERVICE IS CURRENTLY UNAVAILABLE OR FAILING."
         };
     }
 }

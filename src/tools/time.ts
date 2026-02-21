@@ -1,6 +1,7 @@
 export interface ToolResponse {
     result?: string;
     error?: string;
+    system_directive?: string;
 }
 
 export function getCurrentTime(): ToolResponse {
