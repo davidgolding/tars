@@ -107,7 +107,9 @@ export async function startSignalListener(
         try {
             if (!line.trim()) return;
             const msg = JSON.parse(line);
-            console.log(`[Signal] Msg JSON: ${msg}`);
+            if (msg.method === 'receive') {
+                console.log(`[DEBUG] Raw Signal receive payloads:\n${JSON.stringify(msg, null, 2)}`);
+            }
 
             // Handle incoming messages
             if (msg.method === 'receive') {
@@ -159,7 +161,7 @@ export async function startSignalListener(
     signalProcess.stderr.on('data', (data: Buffer) => {
         const stream = data.toString();
         // Only log actual warnings/errors, suppress info/debug unless explicitly needed
-        if (stream.includes('WARN') || stream.includes('ERROR')) {
+        if (process.env.VERBOSE === 'true' || stream.includes('WARN') || stream.includes('ERROR')) {
             console.error(`[signal-cli stderr]: ${stream.trim()}`);
         }
     });
@@ -181,6 +183,10 @@ export async function startSignalListener(
                 console.warn(`[Signal] Could not find a group named "${targetGroup}". Check your group settings.`);
             }
         }, 1000); // give signal-cli a moment to start
+    } else {
+        setTimeout(() => {
+            console.log(`[Signal] Ready and listening for direct messages from: ${targetNumber}`);
+        }, 1000);
     }
 }
 
