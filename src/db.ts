@@ -53,7 +53,7 @@ export function initDb() {
 
   // Initial settings
   db.exec(`
-    INSERT INTO settings (key, value) VALUES ("bootstrapped", "false")
+    INSERT INTO settings (key, value) VALUES ('bootstrapped', 'false')
     ON CONFLICT(key) DO UPDATE SET value=excluded.value
   `);
 
@@ -169,7 +169,7 @@ export function updateAgentContext(category: string, content: string): void {
  * Setting: Update or create setting
  */
 export function updateSetting(key: string, value: string): void {
-  const stmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET content=excluded.value');
+  const stmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
   stmt.run(key, value);
 }
 

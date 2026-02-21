@@ -99,6 +99,7 @@ export async function startSignalListener(
         try {
             if (!line.trim()) return;
             const msg = JSON.parse(line);
+            console.log(`[Signal] Msg JSON: ${msg}`);
 
             // Handle incoming messages
             if (msg.method === 'receive') {
@@ -116,9 +117,12 @@ export async function startSignalListener(
 
                 if (!sender || !body) return;
 
-                const normalizeBase64 = (b64: string | undefined) => b64 ? b64.replace(/=+$/, '') : undefined;
+                const normalizeBase64 = (b64: string | null | undefined) => b64 ? b64.replace(/=+$/, '') : undefined;
 
-                if (targetGroupId && normalizeBase64(msgGroupId) !== normalizeBase64(targetGroupId)) {
+                const normTargetId = normalizeBase64(targetGroupId);
+                const normMsgId = normalizeBase64(msgGroupId);
+
+                if (targetGroupId && normMsgId !== normTargetId) {
                     console.warn(`[SECURITY] Ignored message from ${sender}. Not in bound target group. Detected msgGroupId: ${msgGroupId} | Expected: ${targetGroupId}`);
                     return; // Ignore messages not in the target group
                 }

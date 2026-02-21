@@ -57,6 +57,8 @@ Available tools:
 - delete_context: Deletes a context category. Parameters: {"category": "string"}
 - get_setting: Returns the value of a specific setting key. Parameters: {"key": "string"}
 - update_setting: Updates or creates the value for a setting. Parameters: {"key": "string", "value": "string"}
+
+If you need to use a tool, output ONLY the tool calls. Do not include conversational text. Wait for the tool results before speaking to the user.
     `;
 
     if (!isBootstrapped) {
@@ -82,26 +84,26 @@ Available tools:
         **When You're Done** use update_setting to switch "bootstrapped" to "true". Notify the user you are at their service.
         `;
         return prompt;
-    }
+    } else {
+        prompt += toolProtocol + `\n\n`;
+        prompt += getAgentContext('AGENTS');
 
-    prompt += toolProtocol + `\n\n`;
-    prompt += getAgentContext('AGENTS');
-
-    const categories = getAllAgentContextCategories();
-    for (const cat of categories) {
-        const content = getAgentContext(cat);
-        if (content && cat != 'AGENTS') {
-            prompt += `--- ${cat.toUpperCase()} CONTEXT ---\n${content}\n\n`;
+        const categories = getAllAgentContextCategories();
+        for (const cat of categories) {
+            const content = getAgentContext(cat);
+            if (content && cat != 'AGENTS' && cat != 'SYSTEM') {
+                prompt += `--- ${cat.toUpperCase()} CONTEXT ---\n${content}\n\n`;
+            }
         }
-    }
 
-    if (mcpTools.length > 0) {
-        prompt += `\n### MCP TOOLS ###\nAdditional tools available from MCP:\n`;
-        mcpTools.forEach(tool => {
-            prompt += `- ${tool.name}: ${tool.description}. JSON Schema: ${JSON.stringify(tool.inputSchema)}\n`;
-        });
+        if (mcpTools.length > 0) {
+            prompt += `\n### MCP TOOLS ###\nAdditional tools available from MCP:\n`;
+            mcpTools.forEach(tool => {
+                prompt += `- ${tool.name}: ${tool.description}. JSON Schema: ${JSON.stringify(tool.inputSchema)}\n`;
+            });
+        }
+        return prompt;
     }
-    return prompt;
 }
 
 /**
@@ -140,52 +142,60 @@ export async function runAgentLoop(userMessage: string, provider: LLMProvider): 
             console.log(`[Agent] Model output received (length: ${llmOutput.length})`);
         }
 
-        const toolCallMatch = llmOutput.match(/<TOOL_CALL>\s*({.*?})\s*<\/TOOL_CALL>/s);
-        if (toolCallMatch) {
-            const toolJson = toolCallMatch[1];
-            let toolResultStr = '';
+        const toolCallRegex = /<TOOL_CALL>\s*({.*?})\s*<\/TOOL_CALL>/gs;
+        const toolCalls = [...llmOutput.matchAll(toolCallRegex)];
 
-            try {
-                const parsed = JSON.parse(toolJson);
-                console.log(`[Agent] Executing tool: ${parsed.tool}`);
+        if (toolCalls.length > 0) {
+            let allToolResultsStr = '';
 
-                if (parsed.tool === 'get_current_time') {
-                    toolResultStr = JSON.stringify(getCurrentTime());
-                } else if (parsed.tool === 'save_memory') {
-                    toolResultStr = JSON.stringify(storeMemoryTool(parsed.parameters.content, parsed.parameters.category));
-                } else if (parsed.tool === 'search_memory') {
-                    toolResultStr = JSON.stringify(searchMemoryTool(parsed.parameters.query));
-                } else if (parsed.tool === 'read_file') {
-                    toolResultStr = JSON.stringify(readFileTool(parsed.parameters.path));
-                } else if (parsed.tool === 'write_file') {
-                    toolResultStr = JSON.stringify(writeFileTool(parsed.parameters.path, parsed.parameters.content));
-                } else if (parsed.tool === 'list_files') {
-                    toolResultStr = JSON.stringify(listFilesTool(parsed.parameters.path));
-                } else if (parsed.tool === 'web_search') {
-                    toolResultStr = JSON.stringify(await webSearchTool(parsed.parameters.query));
-                } else if (parsed.tool === 'list_context_categories') {
-                    toolResultStr = JSON.stringify(listContextCategoriesTool());
-                } else if (parsed.tool === 'read_context') {
-                    toolResultStr = JSON.stringify(readContextTool(parsed.parameters.category));
-                } else if (parsed.tool === 'update_context') {
-                    toolResultStr = JSON.stringify(updateContextTool(parsed.parameters.category, parsed.parameters.content));
-                } else if (parsed.tool === 'delete_context') {
-                    toolResultStr = JSON.stringify(deleteContextTool(parsed.parameters.category));
-                } else if (parsed.tool === 'get_setting') {
-                    toolResultStr = JSON.stringify(getSettingTool(parsed.parameters.key));
-                } else if (parsed.tool === 'update_setting') {
-                    toolResultStr = JSON.stringify(updateSettingTool(parsed.parameters.key, parsed.parameters.value));
-                } else if (mcpTools.find(t => t.name === parsed.tool)) {
-                    const mcpRes = await mcpClient?.callTool(parsed.tool, parsed.parameters);
-                    toolResultStr = JSON.stringify(mcpRes);
-                } else {
-                    toolResultStr = JSON.stringify({ error: `Unknown tool: ${parsed.tool}` });
+            for (const match of toolCalls) {
+                const toolJson = match[1];
+                let toolResultStr = '';
+
+                try {
+                    const parsed = JSON.parse(toolJson);
+                    console.log(`[Agent] Executing tool: ${parsed.tool}`);
+
+                    if (parsed.tool === 'get_current_time') {
+                        toolResultStr = JSON.stringify(getCurrentTime());
+                    } else if (parsed.tool === 'save_memory') {
+                        toolResultStr = JSON.stringify(storeMemoryTool(parsed.parameters.content, parsed.parameters.category));
+                    } else if (parsed.tool === 'search_memory') {
+                        toolResultStr = JSON.stringify(searchMemoryTool(parsed.parameters.query));
+                    } else if (parsed.tool === 'read_file') {
+                        toolResultStr = JSON.stringify(readFileTool(parsed.parameters.path));
+                    } else if (parsed.tool === 'write_file') {
+                        toolResultStr = JSON.stringify(writeFileTool(parsed.parameters.path, parsed.parameters.content));
+                    } else if (parsed.tool === 'list_files') {
+                        toolResultStr = JSON.stringify(listFilesTool(parsed.parameters.path));
+                    } else if (parsed.tool === 'web_search') {
+                        toolResultStr = JSON.stringify(await webSearchTool(parsed.parameters.query));
+                    } else if (parsed.tool === 'list_context_categories') {
+                        toolResultStr = JSON.stringify(listContextCategoriesTool());
+                    } else if (parsed.tool === 'read_context') {
+                        toolResultStr = JSON.stringify(readContextTool(parsed.parameters.category));
+                    } else if (parsed.tool === 'update_context') {
+                        toolResultStr = JSON.stringify(updateContextTool(parsed.parameters.category, parsed.parameters.content));
+                    } else if (parsed.tool === 'delete_context') {
+                        toolResultStr = JSON.stringify(deleteContextTool(parsed.parameters.category));
+                    } else if (parsed.tool === 'get_setting') {
+                        toolResultStr = JSON.stringify(getSettingTool(parsed.parameters.key));
+                    } else if (parsed.tool === 'update_setting') {
+                        toolResultStr = JSON.stringify(updateSettingTool(parsed.parameters.key, parsed.parameters.value));
+                    } else if (mcpTools.find(t => t.name === parsed.tool)) {
+                        const mcpRes = await mcpClient?.callTool(parsed.tool, parsed.parameters);
+                        toolResultStr = JSON.stringify(mcpRes);
+                    } else {
+                        toolResultStr = JSON.stringify({ error: `Unknown tool: ${parsed.tool}` });
+                    }
+                } catch (err: any) {
+                    toolResultStr = JSON.stringify({ error: `Failed to parse tool call: ${err.message}` });
                 }
-            } catch (err: any) {
-                toolResultStr = JSON.stringify({ error: `Failed to parse tool call: ${err.message}` });
+
+                allToolResultsStr += `<TOOL_RESULT tool="${match[1]}">\n${toolResultStr}\n</TOOL_RESULT>\n`;
             }
 
-            promptContext += `${llmOutput}\n\n<TOOL_RESULT>\n${toolResultStr}\n</TOOL_RESULT>\n\nTars: `;
+            promptContext += `${llmOutput}\n\n${allToolResultsStr}\n\nTars: `;
             continue;
         }
 
