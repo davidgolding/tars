@@ -119,11 +119,21 @@ export function saveMemory(content: string, category: string = 'general') {
  * Long-term: Search memories
  */
 export function searchMemories(query: string, limit: number = 5) {
+  if (!query || query.trim() === '') return [];
+
+  // FTS5 requires quotes to handle special characters correctly.
+  // An empty phrase or one with only punctuation evaluates to nothing and causes a syntax error.
+  // We ensure there is at least one alphanumeric character.
+  if (!/[a-zA-Z0-9]/.test(query)) {
+    return [];
+  }
+
+  // Replace quotes inside the query to prevent escaping the outer quotes
+  const safeQuery = `"${query.replace(/"/g, '""')}"`;
+
   const stmt = db.prepare('SELECT content, category FROM memories WHERE memories MATCH ? ORDER BY rank LIMIT ?');
-  // FTS5 match syntax usually requires quoting if the query has multiple words or special chars
-  // For simplicity, we'll just pass the query through for now
   try {
-    return stmt.all(query, limit) as { content: string; category: string }[];
+    return stmt.all(safeQuery, limit) as { content: string; category: string }[];
   } catch (err) {
     console.warn('[DB] Memory search failed (likely syntax error):', err);
     return [];
