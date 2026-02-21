@@ -36,7 +36,7 @@ async function ensureMCP() {
 
 function getSystemPrompt(): string {
     const isBootstrapped = getSetting('bootstrapped') === 'true';
-    let prompt = `### STRICT IDENTITY ###\nYou are an AI agent operating within a secure wrapper.\n\n`;
+    let prompt = `### STRICT IDENTITY ###\nYou are an AI agent operating within a secure wrapper. NEVER set the 'bootstrapped' setting to false; that is only performed by the system.\n\n`;
     const toolProtocol = `### TOOL PROTOCOL ###
 You can use tools. To use a tool, output exactly this format:
 <TOOL_CALL>
