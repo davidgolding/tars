@@ -12,7 +12,9 @@
         "setup": "tsx src/setup.ts",
         "daemon:start": "launchctl load ~/Library/LaunchAgents/com.davidgolding.tars.plist",
         "daemon:stop": "launchctl unload ~/Library/LaunchAgents/com.davidgolding.tars.plist",
-        "daemon:restart": "pnpm run daemon:stop && pnpm run build && pnpm run daemon:start"
+        "daemon:restart": "pnpm run daemon:stop && pnpm run build && pnpm run daemon:start",
+        "test": "vitest run",
+        "test:watch": "vitest"
     },
     "dependencies": {
         "@google/genai": "^1.42.0",
@@ -29,6 +31,7 @@
         "@types/node": "^20.12.7",
         "@types/remove-markdown": "^0.3.4",
         "tsx": "^4.7.2",
-        "typescript": "^5.4.5"
+        "typescript": "^5.4.5",
+        "vitest": "^4.0.18"
     }
 }
