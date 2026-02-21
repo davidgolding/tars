@@ -8,6 +8,10 @@ const dbPath = join(__dirname, '../tars.db');
 
 const db = new Database(dbPath);
 
+const config = [
+  { "bootstrapped": false },
+];
+
 // Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
 
@@ -43,6 +47,14 @@ export function initDb() {
     )
   `);
 
+  // Settings table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+
   // Seeding logic for Agent Context
   const countStmt = db.prepare('SELECT COUNT(*) as count FROM agent_context');
   const { count } = countStmt.get() as { count: number };
@@ -73,6 +85,14 @@ export function initDb() {
       console.warn('[DB] Could not find agent/ directory to seed context.');
     }
   }
+
+  const insertSetting = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  const saveConfig = db.transaction((cfg: Record<string, any>) => {
+    for (const [key, value] of Object.entries(cfg)) {
+      insertSetting.run(key, String(value));
+    }
+  });
+  saveConfig(config);
 
   console.log('[DB] Database initialized at', dbPath);
 }
@@ -127,6 +147,15 @@ export function getAgentContext(category: string): string | null {
 }
 
 /**
+ * Setting: Get a given setting
+ */
+export function getSetting(key: string): string | null {
+  const stmt = db.prepare('SELECT key, value FROM settings WHERE key = ?');
+  const row = stmt.get(key) as { value: string } | undefined;
+  return row ? row.value : null;
+}
+
+/**
  * Persona: Get all available context categories
  */
 export function getAllAgentContextCategories(): string[] {
@@ -141,6 +170,14 @@ export function getAllAgentContextCategories(): string[] {
 export function updateAgentContext(category: string, content: string): void {
   const stmt = db.prepare('INSERT INTO agent_context (category, content) VALUES (?, ?) ON CONFLICT(category) DO UPDATE SET content=excluded.content');
   stmt.run(category, content);
+}
+
+/**
+ * Setting: Update or create setting
+ */
+export function updateSetting(key: string, value: string): void {
+  const stmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET content=excluded.value');
+  stmt.run(key, value);
 }
 
 /**

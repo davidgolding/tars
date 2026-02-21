@@ -94,6 +94,14 @@ async function main() {
         });
     }
 
+    let maxIterations = await input({
+        message: 'Enter the maximum number of iterations before cutting off the model/API: ' + chalk.gray('(recommended: 35)'),
+        validate: (value) => {
+            const res = z.number().positive().safeParse(Number(value.trim()));
+            return res.success || 'A number greater than 0 is required';
+        }
+    });
+
     // 3. Channel
     const channel = await select({
         message: 'Select a channel:',
@@ -166,7 +174,7 @@ async function main() {
             fs.copyFileSync(defaultSystemMdPath, systemMdPath);
         } else {
             // Fallback content if the project default is somehow also missing
-            fs.writeFileSync(systemMdPath, '### STRICT IDENTITY ###\nYou ARE Tars, a lean AI agent communicating exclusively via Signal.\n\n### TOOL PROTOCOL ###\nYou can use tools.');
+            fs.writeFileSync(systemMdPath, '### STRICT IDENTITY ###\nYou are a lean AI agent.\n\n');
         }
     }
 
@@ -178,6 +186,7 @@ async function main() {
     }
     envContent += `AGENT_PROMPTS_PATH=${promptsPath}\n`;
     envContent += `LLM_PROVIDER=${llmProviderConfig}\n`;
+    envContent += `LLM_MAX_ITERATIONS=${maxIterations}\n`;
     if (apiKey) {
         envContent += `GEMINI_API_KEY=${apiKey}\n`;
     }

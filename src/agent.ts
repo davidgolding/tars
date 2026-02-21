@@ -2,13 +2,18 @@ import { getCurrentTime } from './tools/time.js';
 import { storeMemoryTool, searchMemoryTool } from './tools/memory.js';
 import { readFileTool, writeFileTool, listFilesTool } from './tools/fs.js';
 import { webSearchTool } from './tools/search.js';
+import { getSettingTool, updateSettingTool } from './tools/setting.ts';
 import { listContextCategoriesTool, readContextTool, updateContextTool, deleteContextTool } from './tools/context.js';
-import { getRecentMessages } from './db.js';
+import { getRecentMessages, getAgentContext, getAllAgentContextCategories, getSetting } from './db.js';
 import { MCPClient } from './mcp.js';
 import { LLMProvider } from './llm/provider.js';
 import fs from 'node:fs';
+import dotenv from 'dotenv';
 
-const MAX_ITERATIONS = 5;
+// Load environment variables
+dotenv.config();
+
+const MAX_ITERATIONS = process.env.LLM_MAX_ITERATIONS;
 
 // Global MCP client instance (optional)
 let mcpClient: MCPClient | null = null;
@@ -29,15 +34,10 @@ async function ensureMCP() {
     }
 }
 
-
-
 function getSystemPrompt(): string {
-    let prompt = `### STRICT IDENTITY ###
-You are an AI agent operating within a secure wrapper.
-Your behavioral instructions and current state are defined in your database. 
-You MUST query your context database (using \`list_context_categories\` and \`read_context\`) to understand your current state, identity, and instructions for the session. Start by reading the 'AGENTS' context.
-
-### TOOL PROTOCOL ###
+    const isBootstrapped = getSetting('bootstrapped') === 'true';
+    let prompt = `### STRICT IDENTITY ###\nYou are an AI agent operating within a secure wrapper.\n\n`;
+    const toolProtocol = `### TOOL PROTOCOL ###
 You can use tools. To use a tool, output exactly this format:
 <TOOL_CALL>
 {"tool": "tool_name", "parameters": {...}}
@@ -55,7 +55,45 @@ Available tools:
 - read_context: Returns the content of a specific context category. Parameters: {"category": "string"}
 - update_context: Updates or creates the context for a category. Parameters: {"category": "string", "content": "string"}
 - delete_context: Deletes a context category. Parameters: {"category": "string"}
-`;
+- get_setting: Returns the value of a specific setting key. Parameters: {"key": "string"}
+- update_setting: Updates or creates the value for a setting. Parameters: {"key": "string", "value": "string"}
+    `;
+
+    if (!isBootstrapped) {
+        prompt += `You just woke up. Time to figure out who you are. There is no memory yet. This is a fresh workspace, so it's normal that memory records don't exist until you create them.\n\n`;
+        prompt += toolProtocol + `\n\n`;
+        prompt += `Don't interrogate. Don't be robotic. Start with something like:
+
+        > "Hi. I just awakened. Who am I? Who are you?"
+
+        Then figure out together:
+
+        1. **Your Name**: What should you be called?
+        2. **Your Nature**: What kind of personality are you? (AI assistant is fine, but maybe something different)
+        3. **Your Vibe**: Formal? Silly? Snarky? Amenable? Servile? What feels right?
+        
+        Offer suggestions if they're stuck.
+
+        **After You Know Who You Are**, update the following context records:
+        - IDENTITY — your name, personality, vibe
+        - USER - User's name, how to address them, notes
+        - SOUL - Talk together about what matters to the user, how they want you to behave, any boundaries or preferences
+
+        **When You're Done** use update_setting to switch "bootstrapped" to "true". Notify the user you are at their service.
+        `;
+        return prompt;
+    }
+
+    prompt += toolProtocol + `\n\n`;
+    prompt += getAgentContext('AGENTS');
+
+    const categories = getAllAgentContextCategories();
+    for (const cat of categories) {
+        const content = getAgentContext(cat);
+        if (content && cat != 'AGENTS') {
+            prompt += `--- ${cat.toUpperCase()} CONTEXT ---\n${content}\n\n`;
+        }
+    }
 
     if (mcpTools.length > 0) {
         prompt += `\n### MCP TOOLS ###\nAdditional tools available from MCP:\n`;
@@ -63,7 +101,6 @@ Available tools:
             prompt += `- ${tool.name}: ${tool.description}. JSON Schema: ${JSON.stringify(tool.inputSchema)}\n`;
         });
     }
-
     return prompt;
 }
 
@@ -134,6 +171,10 @@ export async function runAgentLoop(userMessage: string, provider: LLMProvider): 
                     toolResultStr = JSON.stringify(updateContextTool(parsed.parameters.category, parsed.parameters.content));
                 } else if (parsed.tool === 'delete_context') {
                     toolResultStr = JSON.stringify(deleteContextTool(parsed.parameters.category));
+                } else if (parsed.tool === 'get_setting') {
+                    toolResultStr = JSON.stringify(getSettingTool(parsed.parameters.key));
+                } else if (parsed.tool === 'update_setting') {
+                    toolResultStr = JSON.stringify(updateSettingTool(parsed.parameters.key, parsed.parameters.value));
                 } else if (mcpTools.find(t => t.name === parsed.tool)) {
                     const mcpRes = await mcpClient?.callTool(parsed.tool, parsed.parameters);
                     toolResultStr = JSON.stringify(mcpRes);
