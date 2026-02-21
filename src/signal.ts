@@ -61,6 +61,14 @@ export async function sendSignalTyping(
         console.error('[Signal] Failed to send typing indicator:', err);
     }
 }
+export async function stopSignalListener() {
+    if (signalProcess) {
+        console.log('[Signal] Shutting down signal-cli process...');
+        signalProcess.kill('SIGTERM');
+        signalProcess = null;
+    }
+}
+
 /**
  * Starts the long-running Signal JSON-RPC process.
  */

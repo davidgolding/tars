@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import removeMd from 'remove-markdown';
-import { startSignalListener, sendSignalMessage, sendSignalTyping } from './signal.js';
+import { startSignalListener, sendSignalMessage, sendSignalTyping, stopSignalListener } from './signal.js';
 import { runAgentLoop } from './agent.js';
 import { initDb, saveMessage, getAgentContext } from './db.js';
 import { GeminiCLIProvider } from './llm/gemini-cli-provider.js';
@@ -17,6 +17,19 @@ if (!BOT_SIGNAL_NUMBER || !TARGET_SIGNAL_NUMBER) {
     console.error("[Startup Error] Missing BOT_SIGNAL_NUMBER or TARGET_SIGNAL_NUMBER. Please check .env file.");
     process.exit(1);
 }
+
+// Handle graceful shutdown
+process.on('SIGINT', async () => {
+    console.log('\n[System] Received SIGINT. Shutting down gracefully...');
+    await stopSignalListener();
+    process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+    console.log('\n[System] Received SIGTERM. Shutting down gracefully...');
+    await stopSignalListener();
+    process.exit(0);
+});
 
 async function main() {
     console.log("Starting Tars Level 4: Modular Architecture...");

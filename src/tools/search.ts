@@ -25,7 +25,7 @@ export async function webSearchTool(query: string): Promise<ToolResponse> {
                 .map((topic: any) => topic.text)
                 .join('\n');
         } else {
-            resultText = "No direct answer found. Try a different query.";
+            throw new Error(`No results`);
         }
 
         return {
