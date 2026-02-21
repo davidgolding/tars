@@ -1,10 +1,7 @@
 import dotenv from 'dotenv';
 import removeMd from 'remove-markdown';
 import { startSignalListener, sendSignalMessage, sendSignalTyping, stopSignalListener } from './signal.js';
-import { runAgentLoop } from './agent.js';
-import { initDb, saveMessage, getAgentContext } from './db.js';
-import { GeminiCLIProvider } from './llm/gemini-cli-provider.js';
-import { GeminiAPIProvider } from './llm/gemini-api-provider.js';
+import { initDb, getAgentContext } from './db.js';
 
 // Load environment variables
 dotenv.config();
@@ -17,6 +14,13 @@ if (!BOT_SIGNAL_NUMBER || !TARGET_SIGNAL_NUMBER) {
     console.error("[Startup Error] Missing BOT_SIGNAL_NUMBER or TARGET_SIGNAL_NUMBER. Please check .env file.");
     process.exit(1);
 }
+
+if (!process.env.GEMINI_API_KEY) {
+    console.error('[Startup] GEMINI_API_KEY is required.');
+    process.exit(1);
+}
+
+const MAX_ITERATIONS = parseInt(process.env.LLM_MAX_ITERATIONS || '35', 10);
 
 // Handle graceful shutdown
 process.on('SIGINT', async () => {
@@ -32,14 +36,16 @@ process.on('SIGTERM', async () => {
 });
 
 async function main() {
-    console.log("Starting Tars Level 4: Modular Architecture...");
+    console.log("Starting Tars...");
     initDb();
+
+    // Import tarsAgent after DB is initialized (buildSystemPrompt reads from DB)
+    const { tarsAgent } = await import('./mastra/index.js');
 
     function getAgentName(): string {
         const identity = getAgentContext('IDENTITY');
         if (!identity) return 'Tars';
 
-        // Extract name handling possible multiline or single line values
         const match = identity.match(/- \*\*Name:\*\*(.*?)(?=\n- \*\*|$)/s);
         if (match) {
             const name = match[1].trim();
@@ -50,22 +56,21 @@ async function main() {
         return 'Tars';
     }
 
-    const providerConfig = process.env.LLM_PROVIDER || 'gemini-cli';
-    const provider = providerConfig === 'gemini-api'
-        ? new GeminiAPIProvider(process.env.GEMINI_API_KEY, process.env.GEMINI_API_MODEL)
-        : new GeminiCLIProvider();
-
     await startSignalListener(
         BOT_SIGNAL_NUMBER!,
         TARGET_SIGNAL_NUMBER!,
         TARGET_SIGNAL_GROUP,
         async (text, sender, groupId) => {
             console.log(`[Tars] Processing message from ${sender}...`);
-            saveMessage(sender, text);
             try {
                 await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, true, groupId);
 
-                const response = await runAgentLoop(text, provider);
+                const threadId = groupId ? `signal:group:${groupId}` : `signal:dm:${sender}`;
+                const result = await tarsAgent.generate(text, {
+                    memory: { thread: threadId, resource: TARGET_SIGNAL_NUMBER! },
+                    maxSteps: MAX_ITERATIONS,
+                });
+                const response = result.text;
 
                 await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, false, groupId);
 
@@ -79,16 +84,14 @@ async function main() {
 
                 const textStyles = [`0:${prefix.length}:BOLD`];
 
-                saveMessage(name, plainResponse);
                 await sendSignalMessage(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, plainResponse, groupId, textStyles);
             } catch (err: any) {
-                console.error("[Tars] Error running agent loop:", err);
+                console.error("[Tars] Error running agent:", err);
                 await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, false, groupId);
 
                 let userErrorMessage = "Sorry, an internal error occurred.";
                 if (err && err.message) {
                     try {
-                        // Attempt to parse if the error message is just a JSON string from Google
                         const jsonStart = err.message.indexOf('{');
                         if (jsonStart !== -1) {
                             const parsed = JSON.parse(err.message.substring(jsonStart));
@@ -101,7 +104,6 @@ async function main() {
                             userErrorMessage = `I couldn't process that: ${err.message}`;
                         }
                     } catch (parseErr) {
-                        // Fallback to generic message if parsing fails
                         userErrorMessage = `Sorry, I'm having trouble thinking right now: ${err.message}`;
                     }
                 }

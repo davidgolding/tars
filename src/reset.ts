@@ -4,11 +4,22 @@ import chalk from 'chalk';
 console.log(chalk.red('\n[System] Commencing total cortical wipe...'));
 
 try {
-    // Clear out short-term conversation logs
-    db.exec('DELETE FROM messages;');
+    // Clear Mastra memory tables (messages, threads, vector embeddings)
+    // These tables may not exist on a fresh install, so we ignore errors
+    const mastraTables = [
+        'mastra_messages',
+        'mastra_threads',
+        'mastra_resources',
+        'mastra_memory_text_embedding_004',
+    ];
 
-    // Clear out long-term FTS5 memories
-    db.exec('DELETE FROM memories;');
+    for (const table of mastraTables) {
+        try {
+            db.exec(`DELETE FROM "${table}";`);
+        } catch (_err) {
+            // Table may not exist yet — that's fine
+        }
+    }
 
     // Clear out the seeded agent persona
     db.exec('DELETE FROM agent_context;');
@@ -16,7 +27,7 @@ try {
     // Clear out the settings
     db.exec('DELETE FROM settings;');
 
-    console.log(chalk.yellow('[System] Short-term memory, long-term RAM, and Persona instructions purged.'));
+    console.log(chalk.yellow('[System] Memory, threads, and persona instructions purged.'));
 
     // Re-seed the persona from the agent/ templates
     console.log(chalk.cyan('[System] Re-initializing database schemas and pulling factory templates...'));

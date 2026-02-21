@@ -1,8 +1,15 @@
-node_modules/
+/node_modules
+/dist
+/.agent
+/.agents
+/.mastra
 tars.db
 tars.db-shm
 tars.db-wal
 pnpm-lock.yaml
 .env
 .DS_Store
-/dist
+skills-lock.json
+*.db
+*.db-shm
+*.db-wal
