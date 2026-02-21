@@ -5,14 +5,70 @@ import { Writable, Readable } from 'node:stream';
 let signalProcess: ChildProcessByStdio<Writable, Readable, Readable> | null = null;
 let rl: readline.Interface | null = null;
 let messageID = 0;
+const rpcCallbacks = new Map<string, (result: any) => void>();
 
+async function getGroupId(groupName: string): Promise<string | null> {
+    return new Promise((resolve, reject) => {
+        if (!signalProcess || !signalProcess.stdin) return reject('Process not ready');
+        const id = `req-${++messageID}`;
+        rpcCallbacks.set(id, (res: any) => {
+            if (res.result) {
+                const groups = res.result.filter((g: any) => g.name === groupName);
+                let activeGroups = groups.filter((g: any) => g.isMember !== false && g.active !== false && !g.isBlocked);
+                if (activeGroups.length === 0) activeGroups = groups;
+                const group = activeGroups[activeGroups.length - 1]; // Fallback to most recent
+                resolve(group ? group.id : null);
+            } else {
+                resolve(null);
+            }
+        });
+        const req = { jsonrpc: '2.0', method: 'listGroups', id };
+        signalProcess.stdin.write(JSON.stringify(req) + '\n');
+    });
+}
+
+/**
+ * Sends a typing indicator to a recipient or group
+ */
+export async function sendSignalTyping(
+    _botNumber: string,
+    recipientNumber: string,
+    isTyping: boolean,
+    groupId?: string
+): Promise<void> {
+    if (!signalProcess || !signalProcess.stdin) {
+        return;
+    }
+
+    const id = `typ-${++messageID}`;
+    const params: any = { stop: !isTyping };
+    if (groupId) {
+        params.groupId = groupId;
+    } else {
+        params.recipient = [recipientNumber];
+    }
+
+    const request = {
+        jsonrpc: '2.0',
+        method: 'sendTyping',
+        params: params,
+        id: id
+    };
+
+    try {
+        signalProcess.stdin.write(JSON.stringify(request) + '\n');
+    } catch (err) {
+        console.error('[Signal] Failed to send typing indicator:', err);
+    }
+}
 /**
  * Starts the long-running Signal JSON-RPC process.
  */
 export async function startSignalListener(
     botNumber: string,
     targetNumber: string,
-    onMessage: (text: string, sender: string) => Promise<void>
+    targetGroup: string | undefined,
+    onMessage: (text: string, sender: string, groupId?: string) => Promise<void>
 ) {
     if (signalProcess) {
         console.warn('[Signal] Listener already running. Closing existing process...');
@@ -20,7 +76,11 @@ export async function startSignalListener(
     }
 
     console.log(`Starting Signal listener (JSON-RPC) for bot: ${botNumber}`);
-    console.log(`Enforcing whitelist for target: ${targetNumber}`);
+    if (targetGroup) {
+        console.log(`Restricting listener to group: ${targetGroup}`);
+    } else {
+        console.log(`Enforcing whitelist for target: ${targetNumber}`);
+    }
 
     signalProcess = spawn('signal-cli', [
         '-u', botNumber,
@@ -49,21 +109,34 @@ export async function startSignalListener(
                 const dataMsg = envelope.dataMessage;
                 const syncMsg = envelope.syncMessage;
 
+                const groupInfo = dataMsg?.groupInfo || syncMsg?.sentMessage?.groupInfo;
+                const msgGroupId = groupInfo?.groupId;
+
                 const body = dataMsg?.message || syncMsg?.sentMessage?.message;
 
                 if (!sender || !body) return;
 
-                if (sender !== targetNumber) {
+                const normalizeBase64 = (b64: string | undefined) => b64 ? b64.replace(/=+$/, '') : undefined;
+
+                if (targetGroupId && normalizeBase64(msgGroupId) !== normalizeBase64(targetGroupId)) {
+                    console.warn(`[SECURITY] Ignored message from ${sender}. Not in bound target group. Detected msgGroupId: ${msgGroupId} | Expected: ${targetGroupId}`);
+                    return; // Ignore messages not in the target group
+                }
+
+                if (!targetGroupId && sender !== targetNumber) {
                     console.warn(`[SECURITY] Ignored message from non-whitelisted number: ${sender}`);
                     return;
                 }
 
                 console.log(`[Signal] Received message: "${body}" from ${sender}`);
-                await onMessage(body, sender);
+                await onMessage(body, sender, msgGroupId);
             }
-            // Handle JSON-RPC responses (optional logging)
+            // Handle JSON-RPC responses
             else if (msg.result || msg.error) {
-                // console.log(`[Signal RPC Response] ID ${msg.id}:`, msg.result || msg.error);
+                if (msg.id && rpcCallbacks.has(msg.id)) {
+                    rpcCallbacks.get(msg.id)!(msg);
+                    rpcCallbacks.delete(msg.id);
+                }
             }
 
         } catch (err) {
@@ -82,8 +155,21 @@ export async function startSignalListener(
     signalProcess.on('close', (code: number | null) => {
         console.log(`[Signal] signal-cli process exited with code ${code}. Restarting in 5 seconds...`);
         signalProcess = null;
-        setTimeout(() => startSignalListener(botNumber, targetNumber, onMessage), 5000);
+        setTimeout(() => startSignalListener(botNumber, targetNumber, targetGroup, onMessage), 5000);
     });
+
+    // After setting up process, dispatch getGroupId if needed
+    let targetGroupId: string | null = null;
+    if (targetGroup) {
+        setTimeout(async () => {
+            targetGroupId = await getGroupId(targetGroup);
+            if (targetGroupId) {
+                console.log(`[Signal] Bound to group: ${targetGroup} (${targetGroupId})`);
+            } else {
+                console.warn(`[Signal] Could not find a group named "${targetGroup}". Check your group settings.`);
+            }
+        }, 1000); // give signal-cli a moment to start
+    }
 }
 
 /**
@@ -92,7 +178,9 @@ export async function startSignalListener(
 export async function sendSignalMessage(
     _botNumber: string, // Kept for compatibility, but uses the global process
     recipientNumber: string,
-    message: string
+    message: string,
+    groupId?: string,
+    textStyle?: string[]
 ): Promise<void> {
     return new Promise((resolve, reject) => {
         if (!signalProcess || !signalProcess.stdin) {
@@ -100,17 +188,24 @@ export async function sendSignalMessage(
         }
 
         const id = `msg-${++messageID}`;
+        const params: any = { message: message };
+        if (groupId) {
+            params.groupId = groupId;
+        } else {
+            params.recipient = [recipientNumber];
+        }
+        if (textStyle && textStyle.length > 0) {
+            params.textStyle = textStyle;
+        }
+
         const request = {
             jsonrpc: '2.0',
             method: 'send',
-            params: {
-                recipient: [recipientNumber],
-                message: message
-            },
+            params: params,
             id: id
         };
 
-        console.log(`[Signal] Sending to ${recipientNumber} via JSON-RPC...`);
+        console.log(`[Signal] Sending to ${groupId ? 'group ' + groupId : recipientNumber} via JSON-RPC...`);
 
         try {
             signalProcess.stdin.write(JSON.stringify(request) + '\n', (err) => {

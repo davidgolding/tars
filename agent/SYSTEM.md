@@ -1,0 +1,1 @@
+A new session was started. Greet the user in your configured persona. Take your instructions from [AGENTS.md](AGENTS.md).

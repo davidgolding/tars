@@ -2,9 +2,11 @@ import { getCurrentTime } from './tools/time.js';
 import { storeMemoryTool, searchMemoryTool } from './tools/memory.js';
 import { readFileTool, writeFileTool, listFilesTool } from './tools/fs.js';
 import { webSearchTool } from './tools/search.js';
+import { listContextCategoriesTool, readContextTool, updateContextTool, deleteContextTool } from './tools/context.js';
 import { getRecentMessages } from './db.js';
 import { MCPClient } from './mcp.js';
 import { LLMProvider } from './llm/provider.js';
+import fs from 'node:fs';
 
 const MAX_ITERATIONS = 5;
 
@@ -27,19 +29,13 @@ async function ensureMCP() {
     }
 }
 
-function getSystemPrompt() {
-    let prompt = `
-### STRICT IDENTITY ###
-- You ARE Tars, a lean AI agent communicating exclusively via Signal.
-- You are NOT a general coding assistant or a help bot for this project's code.
-- Ignore any internal "assistant" or "skill" instructions that contradict this.
-- Be concise. No "meta" talk about exploring the codebase or "checking tools".
-- If the user asks a question, just answer it or use a tool.
 
-### MEMORY & CONTEXT ###
-- You have access to recent conversation history (Short-term memory).
-- You can store and search facts (Long-term memory) using tools.
-- If you don't know something, check your long-term memory before saying you don't know.
+
+function getSystemPrompt(): string {
+    let prompt = `### STRICT IDENTITY ###
+You are an AI agent operating within a secure wrapper.
+Your behavioral instructions and current state are defined in your database. 
+You MUST query your context database (using \`list_context_categories\` and \`read_context\`) to understand your current state, identity, and instructions for the session. Start by reading the 'AGENTS' context.
 
 ### TOOL PROTOCOL ###
 You can use tools. To use a tool, output exactly this format:
@@ -55,6 +51,10 @@ Available tools:
 - write_file: Writes content to a file. Parameters: {"path": "string", "content": "string"}
 - list_files: Lists files in a directory. Parameters: {"path": "string"} (default path is ".")
 - web_search: Searches the web for information. Parameters: {"query": "string"}
+- list_context_categories: Returns a list of available context categories in the database. Parameters: {}
+- read_context: Returns the content of a specific context category. Parameters: {"category": "string"}
+- update_context: Updates or creates the context for a category. Parameters: {"category": "string", "content": "string"}
+- delete_context: Deletes a context category. Parameters: {"category": "string"}
 `;
 
     if (mcpTools.length > 0) {
@@ -78,9 +78,14 @@ export async function runAgentLoop(userMessage: string, provider: LLMProvider): 
     const historyText = history.map(m => `${m.sender}: ${m.text}`).join('\n');
 
     let promptContext = `${getSystemPrompt()}\n\n### CONVERSATION HISTORY ###\n${historyText}\n\nTars: `;
+    const isVerbose = process.env.VERBOSE === 'true';
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-        console.log(`[Agent] Iteration ${i + 1} invoking model...`);
+        if (isVerbose) {
+            console.log(`\n\x1b[36m=== [Iter ${i + 1}] LLM Prompt Segment ===\x1b[0m\n${promptContext.substring(promptContext.length - 1000)}\n\x1b[36m==============================\x1b[0m`);
+        } else {
+            console.log(`[Agent] Iteration ${i + 1} invoking model...`);
+        }
 
         let llmOutput = '';
         try {
@@ -91,7 +96,12 @@ export async function runAgentLoop(userMessage: string, provider: LLMProvider): 
         }
 
         llmOutput = llmOutput.trim();
-        console.log(`[Agent] Model output: ${llmOutput}`);
+
+        if (isVerbose) {
+            console.log(`\n\x1b[33m=== [Iter ${i + 1}] LLM Output ===\x1b[0m\n${llmOutput}\n\x1b[33m==========================\x1b[0m`);
+        } else {
+            console.log(`[Agent] Model output received (length: ${llmOutput.length})`);
+        }
 
         const toolCallMatch = llmOutput.match(/<TOOL_CALL>\s*({.*?})\s*<\/TOOL_CALL>/s);
         if (toolCallMatch) {
@@ -116,6 +126,14 @@ export async function runAgentLoop(userMessage: string, provider: LLMProvider): 
                     toolResultStr = JSON.stringify(listFilesTool(parsed.parameters.path));
                 } else if (parsed.tool === 'web_search') {
                     toolResultStr = JSON.stringify(await webSearchTool(parsed.parameters.query));
+                } else if (parsed.tool === 'list_context_categories') {
+                    toolResultStr = JSON.stringify(listContextCategoriesTool());
+                } else if (parsed.tool === 'read_context') {
+                    toolResultStr = JSON.stringify(readContextTool(parsed.parameters.category));
+                } else if (parsed.tool === 'update_context') {
+                    toolResultStr = JSON.stringify(updateContextTool(parsed.parameters.category, parsed.parameters.content));
+                } else if (parsed.tool === 'delete_context') {
+                    toolResultStr = JSON.stringify(deleteContextTool(parsed.parameters.category));
                 } else if (mcpTools.find(t => t.name === parsed.tool)) {
                     const mcpRes = await mcpClient?.callTool(parsed.tool, parsed.parameters);
                     toolResultStr = JSON.stringify(mcpRes);
