@@ -13,3 +13,4 @@ skills-lock.json
 *.db
 *.db-shm
 *.db-wal
+/public/.agents

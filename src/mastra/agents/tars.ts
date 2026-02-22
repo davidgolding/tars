@@ -86,6 +86,7 @@ const sandbox = new LocalSandbox({
 
 const workspace = new Workspace({
     filesystem: filesystem,
+    sandbox: sandbox,
     skills: ['/.agents/skills', '/skills'],
     bm25: true,
 });
