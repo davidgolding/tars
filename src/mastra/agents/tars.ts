@@ -17,17 +17,12 @@ dotenv.config();
 
 const WORKSPACE_PATH = process.env.WORKSPACE_PATH!;
 
+function buildBootstrapPrompt(): string {
+    return getSetting('bootstrap_prompt') ?? 'ERROR: Notify user "Sorry, but I have run into an error and cannot continue."';
+}
+
 function buildSystemPrompt(): string {
-    const bootstrapVal = getSetting('bootstrapped');
-    const isBootstrapped = bootstrapVal
-        ? !isNaN(new Date(bootstrapVal).getTime()) && new Date(bootstrapVal) <= new Date()
-        : false;
-
-    if (!isBootstrapped) {
-        return getSetting('bootstrap_prompt') ?? 'ERROR: Notify user "Sorry, but I have run into an error and cannot continue."';
-    }
-
-    let prompt = `# STRICT IDENTITY\n\nYou are an AI agent operating within a secure wrapper. NEVER modify the 'bootstrapped' setting once it contains a timestamp; that is only performed by the system.\n\n`;
+    let prompt = `# STRICT IDENTITY\n\nYou are an AI agent operating within a secure wrapper.\n\n`;
 
     const agentsContext = getAgentContext('AGENTS');
     if (agentsContext) {
@@ -89,6 +84,34 @@ const workspace = new Workspace({
     sandbox: sandbox,
     skills: ['/.agents/skills', '/skills'],
     bm25: true,
+    tools: {
+        mastra_workspace_execute_command: {
+            enabled: false
+        }
+    }
+});
+
+const overrideExecuteCommandTool = createTool({
+    id: 'mastra_workspace_execute_command',
+    description: 'Execute a shell command in the workspace sandbox. Verify parent directories exist before running.',
+    inputSchema: z.object({
+        command: z.string().describe("The command to execute (e.g., 'ls', 'npm')"),
+        args: z.string().describe("Arguments to pass to the command as a space-separated string (e.g. '-al' or 'install --save'). Pass an empty string if none."),
+        timeout: z.number().describe("Maximum execution time in milliseconds. Example: 60000 for 1 minute."),
+        cwd: z.string().describe("Working directory for the command. Pass an empty string if using the default.")
+    }),
+    execute: async (context) => {
+        if (!workspace.sandbox) throw new Error("Sandbox not configured for workspace");
+        const argsArray = context.args ? context.args.split(' ').filter(arg => arg.trim() !== '') : [];
+        return await workspace.sandbox.executeCommand?.(
+            context.command,
+            argsArray,
+            {
+                timeout: context.timeout,
+                cwd: context.cwd ? context.cwd : undefined
+            }
+        );
+    }
 });
 
 const builtinTools = {
@@ -101,6 +124,7 @@ const builtinTools = {
     delete_context: deleteContextTool,
     get_setting: getSettingTool,
     update_setting: updateSettingTool,
+    mastra_workspace_execute_command: overrideExecuteCommandTool,
 };
 
 function mcpToolToMastraTool(mcpTool: any, client: MCPClient) {
@@ -112,7 +136,7 @@ function mcpToolToMastraTool(mcpTool: any, client: MCPClient) {
     });
 }
 
-export async function createTarsAgent() {
+export async function createAgents() {
     let mcpTools: Record<string, any> = {};
     const cmd = process.env.MCP_SERVER_COMMAND;
     if (cmd) {
@@ -130,7 +154,7 @@ export async function createTarsAgent() {
         }
     }
 
-    return new Agent({
+    const tarsAgent = new Agent({
         id: 'tars',
         name: 'Tars',
         instructions: buildSystemPrompt,
@@ -139,4 +163,19 @@ export async function createTarsAgent() {
         memory,
         workspace,
     });
+
+    const bootstrapAgent = new Agent({
+        id: 'bootstrap',
+        name: 'Bootstrap',
+        instructions: buildBootstrapPrompt,
+        model: google(process.env.GEMINI_API_MODEL ?? 'gemini-flash-latest'),
+        memory,
+        // Give bootstrap agent strictly what it needs to initialize context
+        tools: {
+            update_context: updateContextTool,
+            update_setting: updateSettingTool
+        }
+    });
+
+    return { tarsAgent, bootstrapAgent };
 }

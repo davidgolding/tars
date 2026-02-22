@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import removeMd from 'remove-markdown';
 import { startSignalListener, sendSignalMessage, sendSignalTyping, stopSignalListener } from './signal.js';
-import { initDb, getAgentContext } from './db.js';
+import { initDb, getAgentContext, getSetting } from './db.js';
 
 // Load environment variables
 dotenv.config();
@@ -40,7 +40,7 @@ async function main() {
     initDb();
 
     // Import tarsAgent after DB is initialized (buildSystemPrompt reads from DB)
-    const { tarsAgent } = await import('./mastra/index.js');
+    const { tarsAgent, bootstrapAgent } = await import('./mastra/index.js');
 
     function getAgentName(): string {
         const identity = getAgentContext('IDENTITY');
@@ -71,10 +71,23 @@ async function main() {
                 let response = "";
                 try {
                     const threadId = groupId ? `signal:group:${groupId}` : `signal:dm:${sender}`;
-                    const result = await tarsAgent.generate(text, {
-                        memory: { thread: threadId, resource: TARGET_SIGNAL_NUMBER! },
-                        maxSteps: MAX_ITERATIONS,
-                    });
+
+                    const bootstrapVal = getSetting('bootstrapped');
+                    const isBootstrapped = bootstrapVal
+                        ? !isNaN(new Date(bootstrapVal).getTime()) && new Date(bootstrapVal) <= new Date()
+                        : false;
+
+                    let result;
+                    if (isBootstrapped) {
+                        result = await tarsAgent.generate(text, {
+                            memory: { thread: threadId, resource: TARGET_SIGNAL_NUMBER! },
+                            maxSteps: MAX_ITERATIONS,
+                        });
+                    } else {
+                        result = await bootstrapAgent.generate(text, {
+                            maxSteps: MAX_ITERATIONS,
+                        });
+                    }
                     response = result.text;
                 } finally {
                     if (typingInterval) {

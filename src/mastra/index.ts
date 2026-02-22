@@ -2,18 +2,40 @@ import { Mastra } from '@mastra/core/mastra';
 import { PinoLogger } from '@mastra/loggers';
 import { LibSQLStore } from '@mastra/libsql';
 import { Observability, DefaultExporter, CloudExporter, SensitiveDataFilter } from '@mastra/observability';
-import { createTarsAgent } from './agents/tars.js';
+import { Memory } from '@mastra/memory';
+import { LibSQLVector } from '@mastra/libsql';
+import { google } from '@ai-sdk/google';
+import { createAgents } from './agents/tars.js';
 import { initDb, dbPath } from '../db.js';
 
 initDb();
-const tarsAgent = await createTarsAgent();
+const { tarsAgent, bootstrapAgent } = await createAgents();
+
+const globalMemory = new Memory({
+  storage: new LibSQLStore({
+    id: 'global-memory-storage',
+    url: `file:${dbPath}`,
+  }),
+  vector: new LibSQLVector({
+    id: 'global-vector',
+    url: `file:${dbPath}`,
+  }),
+  embedder: google.textEmbeddingModel('gemini-embedding-001'),
+});
+
+if (typeof (globalMemory as any).__setLogger !== 'function') {
+  (globalMemory as any).__setLogger = () => { };
+}
 
 export const mastra = new Mastra({
-  agents: { tars: tarsAgent },
+  agents: { tars: tarsAgent, bootstrap: bootstrapAgent },
   storage: new LibSQLStore({
     id: 'mastra-storage',
     url: `file:${dbPath}`,
   }),
+  memory: {
+    default: globalMemory
+  },
   logger: new PinoLogger({
     name: 'Mastra',
     level: 'info',
@@ -34,4 +56,4 @@ export const mastra = new Mastra({
   }),
 });
 
-export { tarsAgent };
+export { tarsAgent, bootstrapAgent };
