@@ -11,7 +11,6 @@ import { getCurrentTimeTool } from '../tools/time.js';
 import { webSearchTool, readUrlTool } from '../tools/search.js';
 import { listContextCategoriesTool, readContextTool, updateContextTool, deleteContextTool } from '../tools/context.js';
 import { getSettingTool, updateSettingTool } from '../tools/setting.js';
-import { runTerminalCommandTool } from '../tools/terminal.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -73,8 +72,12 @@ const memory = new Memory({
     },
 });
 
+const allowedPathsStr = process.env.WORKSPACE_ALLOWED_PATHS || '';
+const allowedPaths = allowedPathsStr.split(',').map(p => p.trim()).filter(p => p.length > 0);
+
 const filesystem = new LocalFilesystem({
     basePath: WORKSPACE_PATH,
+    ...(allowedPaths.length > 0 ? { allowedPaths } : {})
 });
 
 const sandbox = new LocalSandbox({
@@ -83,7 +86,7 @@ const sandbox = new LocalSandbox({
 
 const workspace = new Workspace({
     filesystem: filesystem,
-    skills: ['/skills'],
+    skills: ['/.agents/skills', '/skills'],
     bm25: true,
 });
 
@@ -97,7 +100,6 @@ const builtinTools = {
     delete_context: deleteContextTool,
     get_setting: getSettingTool,
     update_setting: updateSettingTool,
-    run_terminal_command: runTerminalCommandTool,
 };
 
 function mcpToolToMastraTool(mcpTool: any, client: MCPClient) {
