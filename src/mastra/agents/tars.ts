@@ -11,6 +11,8 @@ import { getCurrentTimeTool } from '../tools/time.js';
 import { webSearchTool, readUrlTool } from '../tools/search.js';
 import { listContextCategoriesTool, readContextTool, updateContextTool, deleteContextTool } from '../tools/context.js';
 import { getSettingTool, updateSettingTool } from '../tools/setting.js';
+import { overrideExecuteCommandTool } from '../tools/execute.js';
+import { workspace } from '../workspace.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -39,6 +41,7 @@ function buildSystemPrompt(): string {
     }
 
     prompt += 'Do not call web_search more than 3 consecutive times.\n';
+    prompt += 'CRITICAL: If you need to update working memory, you MUST use the updateWorkingMemory tool. DO NOT output `<working_memory_template>` or any memory contents directly in your reply to the user.\n';
 
     return prompt;
 }
@@ -67,54 +70,9 @@ const memory = new Memory({
     },
 });
 
-const allowedPathsStr = process.env.WORKSPACE_ALLOWED_PATHS || '';
-const allowedPaths = allowedPathsStr.split(',').map(p => p.trim()).filter(p => p.length > 0);
 
-const filesystem = new LocalFilesystem({
-    basePath: WORKSPACE_PATH,
-    ...(allowedPaths.length > 0 ? { allowedPaths } : {})
-});
 
-const sandbox = new LocalSandbox({
-    workingDirectory: WORKSPACE_PATH,
-});
-
-const workspace = new Workspace({
-    filesystem: filesystem,
-    sandbox: sandbox,
-    skills: ['/.agents/skills', '/skills'],
-    bm25: true,
-    tools: {
-        mastra_workspace_execute_command: {
-            enabled: false
-        }
-    }
-});
-
-const overrideExecuteCommandTool = createTool({
-    id: 'mastra_workspace_execute_command',
-    description: 'Execute a shell command in the workspace sandbox. Verify parent directories exist before running.',
-    inputSchema: z.object({
-        command: z.string().describe("The command to execute (e.g., 'ls', 'npm')"),
-        args: z.string().describe("Arguments to pass to the command as a space-separated string (e.g. '-al' or 'install --save'). Pass an empty string if none."),
-        timeout: z.number().describe("Maximum execution time in milliseconds. Example: 60000 for 1 minute."),
-        cwd: z.string().describe("Working directory for the command. Pass an empty string if using the default.")
-    }),
-    execute: async (context) => {
-        if (!workspace.sandbox) throw new Error("Sandbox not configured for workspace");
-        const argsArray = context.args ? context.args.split(' ').filter(arg => arg.trim() !== '') : [];
-        return await workspace.sandbox.executeCommand?.(
-            context.command,
-            argsArray,
-            {
-                timeout: context.timeout,
-                cwd: context.cwd ? context.cwd : undefined
-            }
-        );
-    }
-});
-
-const builtinTools = {
+export const builtinTools = {
     get_current_time: getCurrentTimeTool,
     web_search: webSearchTool,
     read_url: readUrlTool,

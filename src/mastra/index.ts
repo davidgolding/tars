@@ -5,7 +5,7 @@ import { Observability, DefaultExporter, CloudExporter, SensitiveDataFilter } fr
 import { Memory } from '@mastra/memory';
 import { LibSQLVector } from '@mastra/libsql';
 import { google } from '@ai-sdk/google';
-import { createAgents } from './agents/tars.js';
+import { createAgents, builtinTools } from './agents/tars.js';
 import { initDb, dbPath } from '../db.js';
 
 initDb();
@@ -29,6 +29,7 @@ if (typeof (globalMemory as any).__setLogger !== 'function') {
 
 export const mastra = new Mastra({
   agents: { tars: tarsAgent, bootstrap: bootstrapAgent },
+  tools: builtinTools,
   storage: new LibSQLStore({
     id: 'mastra-storage',
     url: `file:${dbPath}`,
