@@ -63,12 +63,23 @@ export function initDb() {
       fullPath = join(process.cwd(), 'agent');
     }
 
+    // Load BOOTSTRAP into `bootstrap_prompt` setting
+    const bootstrapFile = join(fullPath, 'BOOTSTRAP.md');
+    const bootstrapPrompt = fs.existsSync(bootstrapFile) ? fs.readFileSync(bootstrapFile, 'utf-8') : '';
+
+    const stmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value');
+    stmt.run('bootstrap_prompt', bootstrapPrompt);
+
     if (fs.existsSync(fullPath)) {
       const files = fs.readdirSync(fullPath).filter(f => f.endsWith('.md'));
       const insertStmt = db.prepare('INSERT INTO agent_context (category, content) VALUES (?, ?)');
       const insertMany = db.transaction((files: string[]) => {
         for (const file of files) {
           const category = basename(file, '.md');
+          //Do not load BOOTSTRAP.md or SYSTEM.md files; would break agentic turns and flow
+          if (category == 'BOOTSTRAP' || category == 'SYSTEM') {
+            continue;
+          }
           const content = fs.readFileSync(join(fullPath, file), 'utf-8');
           insertStmt.run(category, content);
         }
@@ -76,7 +87,7 @@ export function initDb() {
       insertMany(files);
       console.log(`[DB] Seeded ${files.length} context categories.`);
     } else {
-      console.warn('[DB] Could not find agent/ directory to seed context.');
+      console.warn('[DB] Could not find `agent/` directory to seed context.');
     }
   }
   console.log('[DB] Database initialized at', dbPath);

@@ -12,33 +12,6 @@ import { webSearchTool } from '../tools/search.js';
 import { listContextCategoriesTool, readContextTool, updateContextTool, deleteContextTool } from '../tools/context.js';
 import { getSettingTool, updateSettingTool } from '../tools/setting.js';
 
-const BOOTSTRAP_PROMPT = `### STRICT IDENTITY ###
-You are an AI agent operating within a secure wrapper. NEVER modify the 'bootstrapped' setting once it contains a timestamp; that is only performed by the system.
-
-You just woke up. Time to figure out who you are. There is no memory yet. This is a fresh workspace, so it's normal that memory records don't exist until you create them.
-
-Don't interrogate. Don't be robotic. Start with something like:
-
-> "Hi. I just awakened. Who am I? Who are you?"
-
-Then figure out together:
-
-1. **Your Name**: What should you be called?
-2. **Your Nature**: What kind of personality are you? (AI assistant is fine, but maybe something different)
-3. **Your Vibe**: Formal? Silly? Snarky? Amenable? Servile? What feels right?
-
-Offer suggestions if they're stuck.
-
-**After You Know Who You Are**, update the following context records:
-- IDENTITY — your name, personality, vibe
-- USER - User's name, how to address them, notes
-- SOUL - Talk together about what matters to the user, how they want you to behave, any boundaries or preferences
-
-**When You're Done**: Use update_setting to record the current time in 'bootstrapped'. Notify the user you are at their service.
-
-Do not call web_search more than 3 consecutive times.
-`;
-
 function buildSystemPrompt(): string {
     const bootstrapVal = getSetting('bootstrapped');
     const isBootstrapped = bootstrapVal
@@ -46,10 +19,10 @@ function buildSystemPrompt(): string {
         : false;
 
     if (!isBootstrapped) {
-        return BOOTSTRAP_PROMPT;
+        return getSetting('bootstrap_prompt') ?? 'ERROR: Notify user "Sorry, but I have run into an error and cannot continue."';
     }
 
-    let prompt = `### STRICT IDENTITY ###\nYou are an AI agent operating within a secure wrapper. NEVER modify the 'bootstrapped' setting once it contains a timestamp; that is only performed by the system.\n\n`;
+    let prompt = `# STRICT IDENTITY\n\nYou are an AI agent operating within a secure wrapper. NEVER modify the 'bootstrapped' setting once it contains a timestamp; that is only performed by the system.\n\n`;
 
     const agentsContext = getAgentContext('AGENTS');
     if (agentsContext) {
@@ -58,10 +31,10 @@ function buildSystemPrompt(): string {
 
     const categories = getAllAgentContextCategories();
     for (const cat of categories) {
-        if (cat === 'AGENTS' || cat === 'SYSTEM') continue;
+        if (cat === 'AGENTS' || cat === 'SYSTEM' || cat === 'BOOTSTRAP') continue;
         const content = getAgentContext(cat);
         if (content) {
-            prompt += `--- ${cat.toUpperCase()} CONTEXT ---\n${content}\n\n`;
+            prompt += `<CONTEXT:${cat.toUpperCase()}>\n\n${content}\n\n</CONTEXT:${cat.toUpperCase()}>\n\n`;
         }
     }
 
@@ -79,7 +52,7 @@ const memory = new Memory({
         id: 'tars-vector',
         url: 'file:./tars.db',
     }),
-    embedder: google.textEmbeddingModel('text-embedding-004'),
+    embedder: google.textEmbeddingModel('gemini-embedding-001'),
     options: {
         lastMessages: 10,
         semanticRecall: {
@@ -134,7 +107,7 @@ export async function createTarsAgent() {
         id: 'tars',
         name: 'Tars',
         instructions: buildSystemPrompt,
-        model: google(process.env.GEMINI_API_MODEL ?? 'gemini-2.0-flash'),
+        model: google(process.env.GEMINI_API_MODEL ?? 'gemini-flash-latest'),
         tools: { ...builtinTools, ...mcpTools },
         memory,
     });
