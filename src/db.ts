@@ -1,22 +1,13 @@
+import dotenv from 'dotenv';
 import Database from 'better-sqlite3';
-import { join, dirname, basename, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, basename } from 'node:path';
 import fs from 'node:fs';
 
-function findProjectRoot(startDir: string): string {
-  let dir = startDir;
-  while (true) {
-    // Skip package.json inside Mastra's build artifact directories
-    const isArtifact = dir.includes(`${sep}.mastra${sep}`) || dir.endsWith(`${sep}.mastra`);
-    if (!isArtifact && fs.existsSync(join(dir, 'package.json'))) return dir;
-    const parent = dirname(dir);
-    if (parent === dir) throw new Error('Cannot find project root (no package.json found)');
-    dir = parent;
-  }
-}
+dotenv.config();
 
-const projectRoot = findProjectRoot(dirname(fileURLToPath(import.meta.url)));
-export const dbPath = join(projectRoot, 'src/mastra/public/tars.db');
+const WORKSPACE_PATH = process.env.WORKSPACE_PATH!;
+
+export const dbPath = join(WORKSPACE_PATH, '/tars.db');
 
 const db = new Database(dbPath);
 

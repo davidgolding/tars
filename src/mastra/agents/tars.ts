@@ -1,16 +1,22 @@
 import { Agent } from '@mastra/core/agent';
 import { Memory } from '@mastra/memory';
+import { Workspace, LocalFilesystem, LocalSandbox } from '@mastra/core/workspace';
 import { LibSQLStore, LibSQLVector } from '@mastra/libsql';
 import { google } from '@ai-sdk/google';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import { MCPClient } from '../../mcp.js';
-import { getSetting, getAgentContext, getAllAgentContextCategories } from '../../db.js';
+import { getSetting, getAgentContext, getAllAgentContextCategories, dbPath } from '../../db.js';
 import { getCurrentTimeTool } from '../tools/time.js';
-import { readFileTool, writeFileTool, listFilesTool } from '../tools/fs.js';
-import { webSearchTool } from '../tools/search.js';
+import { webSearchTool, readUrlTool } from '../tools/search.js';
 import { listContextCategoriesTool, readContextTool, updateContextTool, deleteContextTool } from '../tools/context.js';
 import { getSettingTool, updateSettingTool } from '../tools/setting.js';
+import { runTerminalCommandTool } from '../tools/terminal.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const WORKSPACE_PATH = process.env.WORKSPACE_PATH!;
 
 function buildSystemPrompt(): string {
     const bootstrapVal = getSetting('bootstrapped');
@@ -31,7 +37,7 @@ function buildSystemPrompt(): string {
 
     const categories = getAllAgentContextCategories();
     for (const cat of categories) {
-        if (cat === 'AGENTS' || cat === 'SYSTEM' || cat === 'BOOTSTRAP') continue;
+        if (cat === 'AGENTS' || cat === 'SYSTEM' || cat === 'BOOTSTRAP' || cat === 'USER') continue;
         const content = getAgentContext(cat);
         if (content) {
             prompt += `<CONTEXT:${cat.toUpperCase()}>\n\n${content}\n\n</CONTEXT:${cat.toUpperCase()}>\n\n`;
@@ -46,11 +52,11 @@ function buildSystemPrompt(): string {
 const memory = new Memory({
     storage: new LibSQLStore({
         id: 'tars-memory-storage',
-        url: 'file:./tars.db',
+        url: `file:${dbPath}`,
     }),
     vector: new LibSQLVector({
         id: 'tars-vector',
-        url: 'file:./tars.db',
+        url: `file:${dbPath}`,
     }),
     embedder: google.textEmbeddingModel('gemini-embedding-001'),
     options: {
@@ -59,21 +65,39 @@ const memory = new Memory({
             topK: 5,
             messageRange: { before: 2, after: 1 },
         },
+        workingMemory: {
+            enabled: true,
+            scope: 'resource',
+            template: getAgentContext('USER') ?? `User Profile:\n - Name:\n -What to call them:\n - Location:\n - Notes:`,
+        },
     },
+});
+
+const filesystem = new LocalFilesystem({
+    basePath: WORKSPACE_PATH,
+});
+
+const sandbox = new LocalSandbox({
+    workingDirectory: WORKSPACE_PATH,
+});
+
+const workspace = new Workspace({
+    filesystem: filesystem,
+    skills: ['/skills'],
+    bm25: true,
 });
 
 const builtinTools = {
     get_current_time: getCurrentTimeTool,
-    read_file: readFileTool,
-    write_file: writeFileTool,
-    list_files: listFilesTool,
     web_search: webSearchTool,
+    read_url: readUrlTool,
     list_context_categories: listContextCategoriesTool,
     read_context: readContextTool,
     update_context: updateContextTool,
     delete_context: deleteContextTool,
     get_setting: getSettingTool,
     update_setting: updateSettingTool,
+    run_terminal_command: runTerminalCommandTool,
 };
 
 function mcpToolToMastraTool(mcpTool: any, client: MCPClient) {
@@ -110,5 +134,6 @@ export async function createTarsAgent() {
         model: google(process.env.GEMINI_API_MODEL ?? 'gemini-flash-latest'),
         tools: { ...builtinTools, ...mcpTools },
         memory,
+        workspace,
     });
 }

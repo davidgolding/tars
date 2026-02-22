@@ -63,16 +63,27 @@ async function main() {
         async (text, sender, groupId) => {
             console.log(`[Tars] Processing message from ${sender}...`);
             try {
+                let typingInterval: NodeJS.Timeout | null = setInterval(async () => {
+                    await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, true, groupId);
+                }, 12000);
                 await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, true, groupId);
 
-                const threadId = groupId ? `signal:group:${groupId}` : `signal:dm:${sender}`;
-                const result = await tarsAgent.generate(text, {
-                    memory: { thread: threadId, resource: TARGET_SIGNAL_NUMBER! },
-                    maxSteps: MAX_ITERATIONS,
-                });
-                const response = result.text;
+                let response = "";
+                try {
+                    const threadId = groupId ? `signal:group:${groupId}` : `signal:dm:${sender}`;
+                    const result = await tarsAgent.generate(text, {
+                        memory: { thread: threadId, resource: TARGET_SIGNAL_NUMBER! },
+                        maxSteps: MAX_ITERATIONS,
+                    });
+                    response = result.text;
+                } finally {
+                    if (typingInterval) {
+                        clearInterval(typingInterval);
+                        typingInterval = null;
+                    }
+                    await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, false, groupId);
+                }
 
-                await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, false, groupId);
 
                 // Strip markdown for Signal compatibility
                 let plainResponse = removeMd(response);
