@@ -131,3 +131,43 @@ See `.env.example`. Key ones:
 - The database file is `tars.db` in the project root. `pnpm run clean` resets it completely.
 - `src/mastra/` is the core agent subsystem. Load the `/mastra` skill before touching that code.
 - The `dist/` and `.mastra/` directories are build artifacts and should not be edited directly.
+
+## Handoff
+Generated: 2026-02-22T17:41:45-07:00
+
+### Spec Reference
+The Tars project is a local-first AI agent using Mastra, running on Signal with a Gemini backend. Current efforts are focused on improving the agent's core capabilities, isolating bootstrapping logic, solidifying sandbox execution schemas, and adding reliable web search via Jina AI.
+
+### Architecture Snapshot
+- `src/mastra/agents/tars.ts`: Main agent definition, now separated into `TarsAgent` and `BootstrapAgent`.
+- `src/index.ts`: Signal message handler and dynamic routing between agents.
+- `src/mastra/tools/`: Custom local tools including `search.ts` (Jina AI) and `execute.ts` (shell sandbox).
+- `src/mastra/workspace.ts`: Configures `LocalSandbox` boundaries for command execution.
+
+### Current State
+- **Working / complete:** `BootstrapAgent` memory isolation, Mastra workspace execution schema fixes, dynamic routing, Jina AI search & fetch tools.
+- **In progress:** Polishing core agent integration and custom tools.
+- **Blocked / known issues:** None.
+
+### Recent Changes
+- `src/mastra/agents/tars.ts`: Separated `TarsAgent` & `BootstrapAgent` to isolate memory initialization. Fixed missing telemetry in custom tools.
+- `src/index.ts`: Added dynamic routing to use the correct agent based on the `bootstrapped` state toggle.
+- `src/mastra/workspace.ts`: Extracted workspace initialization to solve dependency cycles. Configured specific CWD resolving for executed commands.
+- `src/mastra/tools/execute.ts`: Created `execute_command` explicitly to replace Mastra's built-in sandbox tool, solving Gemini schema failures.
+- `src/mastra/tools/search.ts`: Implemented `web_search` and `read_url` tools using `s.jina.ai` and `r.jina.ai` securely via `JINA_API_KEY`.
+- `.env`: Verified the `.env` configuration contains `JINA_API_KEY`.
+
+### Next Steps
+1. Verify the multi-agent bootstrapping flow works smoothly from scratch (`pnpm run clean`).
+2. Test new tools (`web_search`, `read_url`, `execute_command`) extensively in complex usage via Signal client or Dev Studio.
+3. Continue expanding Mastra agent capabilities or customizing system prompts.
+
+### Key Decisions & Context
+- **Jina AI:** Used seamlessly over a standard HTTP auth key for search/fetch instead of Playwright/SearXNG to maintain strict lightweight footprint.
+- **Bootstrapping Isolation:** `BootstrapAgent` intentionally omits the `memory` argument in `.generate()` to prevent creating traces until identity is fully bootstrapped.
+- **Execute schema overload:** Mastra's built-in `mastra_workspace_execute_command` is disabled in the Workspace config. The replacement custom tool is named `execute_command` and enforces mandatory JSON schema arguments to prevent Gemini 2.0 crashes.
+
+### Dev Environment
+- `pnpm` package manager
+- `pnpm run dev:mastra` to start Dev Studio on `:4112`.
+- `pnpm run build && pnpm run start` for daemon usage.

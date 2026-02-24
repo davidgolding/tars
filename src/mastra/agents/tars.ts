@@ -24,7 +24,7 @@ function buildBootstrapPrompt(): string {
 }
 
 function buildSystemPrompt(): string {
-    let prompt = `# STRICT IDENTITY\n\nYou are an AI agent operating within a secure wrapper.\n\n`;
+    let prompt = `# STRICT IDENTITY\n\nYou are an AI agent operating within a secure wrapper. Decompose tasks into steps using available tools.\n\n`;
 
     const agentsContext = getAgentContext('AGENTS');
     if (agentsContext) {
@@ -82,7 +82,7 @@ export const builtinTools = {
     delete_context: deleteContextTool,
     get_setting: getSettingTool,
     update_setting: updateSettingTool,
-    mastra_workspace_execute_command: overrideExecuteCommandTool,
+    execute_command: overrideExecuteCommandTool,
 };
 
 function mcpToolToMastraTool(mcpTool: any, client: MCPClient) {

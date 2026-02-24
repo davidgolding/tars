@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { workspace } from '../workspace.js';
 
 export const overrideExecuteCommandTool = createTool({
-    id: 'mastra_workspace_execute_command',
+    id: 'execute_command',
     description: `Execute a shell command in the workspace sandbox. Verify parent directories exist before running.
 IMPORTANT: The 'command' argument must be the actual shell executable (e.g. 'pnpx'). Do NOT pass the name of this tool as the command!`,
     inputSchema: z.object({
