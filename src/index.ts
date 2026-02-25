@@ -15,8 +15,8 @@ if (!BOT_SIGNAL_NUMBER || !TARGET_SIGNAL_NUMBER) {
     process.exit(1);
 }
 
-if (!process.env.GEMINI_API_KEY) {
-    console.error('[Startup] GEMINI_API_KEY is required.');
+if (!process.env.LLM_API_KEY) {
+    console.error('[Startup] LLM_API_KEY is required.');
     process.exit(1);
 }
 

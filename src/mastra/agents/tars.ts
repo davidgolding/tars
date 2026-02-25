@@ -12,6 +12,7 @@ import { webSearchTool, readUrlTool } from '../tools/search.js';
 import { listContextCategoriesTool, readContextTool, updateContextTool, deleteContextTool } from '../tools/context.js';
 import { getSettingTool, updateSettingTool } from '../tools/setting.js';
 import { overrideExecuteCommandTool } from '../tools/execute.js';
+import { checkForUpdateTool } from '../tools/update.js';
 import { workspace } from '../workspace.js';
 import dotenv from 'dotenv';
 
@@ -83,6 +84,7 @@ export const builtinTools = {
     get_setting: getSettingTool,
     update_setting: updateSettingTool,
     execute_command: overrideExecuteCommandTool,
+    check_for_update: checkForUpdateTool,
 };
 
 function mcpToolToMastraTool(mcpTool: any, client: MCPClient) {
@@ -116,7 +118,7 @@ export async function createAgents() {
         id: 'tars',
         name: 'Tars',
         instructions: buildSystemPrompt,
-        model: google(process.env.GEMINI_API_MODEL ?? 'gemini-flash-latest'),
+        model: process.env.LLM_API_MODEL ?? 'google/gemini-2.0-flash',
         tools: { ...builtinTools, ...mcpTools },
         memory,
         workspace,
@@ -126,7 +128,7 @@ export async function createAgents() {
         id: 'bootstrap',
         name: 'Bootstrap',
         instructions: buildBootstrapPrompt,
-        model: google(process.env.GEMINI_API_MODEL ?? 'gemini-flash-latest'),
+        model: process.env.LLM_API_LITE_MODEL ?? 'google/gemini-flash-lite-latest',
         memory,
         // Give bootstrap agent strictly what it needs to initialize context
         tools: {

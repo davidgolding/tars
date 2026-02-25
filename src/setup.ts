@@ -89,9 +89,13 @@ async function main() {
 
     if (selectedModel === 'custom') {
         selectedModel = await input({
-            message: 'Enter the exact model name (e.g., gemini-3-flash-preview):',
+            message: 'Enter the exact model name (e.g., google/gemini-3-flash-preview, anthropic/claude-3-5-sonnet-latest):',
             validate: (value) => value.trim().length > 0 || 'Model name is required',
         });
+    }
+
+    if (!selectedModel.includes('/')) {
+        selectedModel = `google/${selectedModel}`;
     }
 
     let maxIterations = await input({
@@ -188,9 +192,9 @@ async function main() {
     envContent += `LLM_PROVIDER=${llmProviderConfig}\n`;
     envContent += `LLM_MAX_ITERATIONS=${maxIterations}\n`;
     if (apiKey) {
-        envContent += `GEMINI_API_KEY=${apiKey}\n`;
+        envContent += `LLM_API_KEY=${apiKey}\n`;
     }
-    envContent += `GEMINI_API_MODEL=${selectedModel}\n`;
+    envContent += `LLM_API_MODEL=${selectedModel}\n`;
 
     fs.writeFileSync(envPath, envContent);
     console.log(chalk.green(`\n✔ Wrote configuration to ${envPath}`));

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Tars is a local-first AI agent that operates over Signal. It uses Google Gemini (`@ai-sdk/google` + `GEMINI_API_KEY`) as the LLM backend and runs entirely on the local machine. The agent communicates exclusively via Signal messages, using signal-cli as a subprocess daemon. The agent infrastructure is built on Mastra (agent, memory, tools).
+Tars is a local-first AI agent that operates over Signal. It uses Google Gemini (`@ai-sdk/google` + `LLM_API_KEY`) as the LLM backend and runs entirely on the local machine. The agent communicates exclusively via Signal messages, using signal-cli as a subprocess daemon. The agent infrastructure is built on Mastra (agent, memory, tools).
 
 ## Commands
 
@@ -94,7 +94,7 @@ The `bootstrapped` setting controls which system prompt is used:
 
 ### LLM Provider
 
-Tars uses `@ai-sdk/google` with `GEMINI_API_KEY`. The model is configured via `GEMINI_API_MODEL` (default: `gemini-2.0-flash`). `gemini-cli` is no longer supported.
+Tars uses the Mastra `provider/model` string specification for its LLM. The model is configured via `LLM_API_MODEL` (default: `google/gemini-2.0-flash`) and authenticated via `LLM_API_KEY`. `gemini-cli` is no longer supported.
 
 ### MCP Support (`src/mcp.ts`)
 
@@ -117,8 +117,8 @@ See `.env.example`. Key ones:
 | `BOT_SIGNAL_NUMBER` | — | Required. E.164 format. |
 | `TARGET_SIGNAL_NUMBER` | — | Required. Whitelisted user. |
 | `TARGET_SIGNAL_GROUP` | — | Optional group name; if set, DMs from target number are ignored. |
-| `GEMINI_API_KEY` | — | Required. Google AI API key. |
-| `GEMINI_API_MODEL` | `gemini-2.0-flash` | Model to use. |
+| `LLM_API_KEY` | — | Required. LLM API key. |
+| `LLM_API_MODEL` | `google/gemini-2.0-flash` | Provider/Model string to use. |
 | `LLM_MAX_ITERATIONS` | `35` | Max agent loop steps per message. |
 | `SIGNAL_CLI_PORT` | `8080` | Port for the signal-cli HTTP daemon. |
 | `MCP_SERVER_COMMAND` | — | Optional STDIO MCP server to load tools from. |
