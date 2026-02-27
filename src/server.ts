@@ -9,6 +9,7 @@ import { spawn, exec } from 'child_process';
 import { z } from 'zod';
 import { getSetting, initDb, updateSetting, dbPath } from './db.js';
 import { uiEvents } from './signal_events.js';
+import { checkSignalStatus } from './signal.js';
 import Database from 'better-sqlite3';
 
 dotenv.config();
@@ -42,16 +43,18 @@ async function createServer() {
     // API Router
     const apiRouter = express.Router();
 
-    apiRouter.get('/status', (req, res) => {
+    apiRouter.get('/status', async (req, res) => {
         try {
             const bootstrapped = getSetting('bootstrapped');
             const botNumber = getSetting('BOT_SIGNAL_NUMBER') || process.env.BOT_SIGNAL_NUMBER;
             const targetNumber = getSetting('TARGET_SIGNAL_NUMBER') || process.env.TARGET_SIGNAL_NUMBER;
+            const signalOnline = await checkSignalStatus();
             res.json({
                 bootstrapped: !!bootstrapped,
                 timestamp: bootstrapped,
                 botNumber,
-                targetNumber
+                targetNumber,
+                signalOnline
             });
         } catch (err) {
             res.status(500).json({ error: (err as Error).message });

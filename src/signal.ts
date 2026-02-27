@@ -97,6 +97,18 @@ async function waitForDaemonReady(timeoutMs = 60000): Promise<boolean> {
 }
 
 /**
+ * Checks if the signal-cli daemon is responsive.
+ */
+export async function checkSignalStatus(): Promise<boolean> {
+    try {
+        const res = await fetch(`${getBaseUrl()}/api/v1/check`);
+        return res.ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
  * Starts the long-running Signal daemon process and attaches an SSE listener.
  */
 export async function startSignalListener(

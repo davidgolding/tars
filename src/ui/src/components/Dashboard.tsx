@@ -20,9 +20,14 @@ export function Dashboard() {
   };
 
   useEffect(() => {
-    fetch('/api/status')
-      .then(res => res.json())
-      .then(setStatus);
+    const fetchStatus = () => {
+      fetch('/api/status')
+        .then(res => res.json())
+        .then(setStatus);
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 10000);
 
     fetch('/api/chat/history')
       .then(res => res.json())
@@ -36,7 +41,10 @@ export function Dashboard() {
       setMessages(prev => [...prev, newMessage]);
     };
 
-    return () => eventSource.close();
+    return () => {
+      eventSource.close();
+      clearInterval(interval);
+    };
   }, []);
 
   useEffect(scrollToBottom, [messages]);
@@ -191,15 +199,17 @@ export function Dashboard() {
 
                <div className="flex items-center justify-between p-5 bg-gray-800/30 rounded-2xl border border-gray-800 hover:border-gray-700 transition-colors">
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-yellow-500/10 rounded-full flex items-center justify-center">
-                       <div className="w-3 h-3 bg-yellow-500 rounded-full animate-pulse"></div>
+                    <div className={`w-10 h-10 ${status?.signalOnline ? 'bg-green-500/10' : 'bg-red-500/10'} rounded-full flex items-center justify-center`}>
+                       <div className={`w-3 h-3 ${status?.signalOnline ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.6)]' : 'bg-red-500'} rounded-full animate-pulse`}></div>
                     </div>
                     <div>
                       <span className="block font-bold">Signal Daemon</span>
-                      <span className="text-[10px] text-gray-500 font-mono">Process ID: ???</span>
+                      <span className="text-[10px] text-gray-500 font-mono">Status: {status?.signalOnline ? 'Responsive' : 'Unresponsive'}</span>
                     </div>
                   </div>
-                  <span className="text-[10px] font-black text-yellow-500 bg-yellow-950/40 px-3 py-1.5 rounded-lg border border-yellow-900/50 uppercase tracking-tighter">UNKNOWN</span>
+                  <span className={`text-[10px] font-black ${status?.signalOnline ? 'text-green-500 bg-green-950/40 border-green-900/50' : 'text-red-500 bg-red-950/40 border-red-900/50'} px-3 py-1.5 rounded-lg border uppercase tracking-tighter`}>
+                    {status?.signalOnline ? 'ONLINE' : 'OFFLINE'}
+                  </span>
                </div>
             </div>
           </div>
