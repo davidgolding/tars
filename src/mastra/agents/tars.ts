@@ -13,6 +13,7 @@ import { listContextCategoriesTool, readContextTool, updateContextTool, deleteCo
 import { getSettingTool, updateSettingTool } from '../tools/setting.js';
 import { overrideExecuteCommandTool } from '../tools/execute.js';
 import { checkForUpdateTool } from '../tools/update.js';
+import { createScheduleTool, listSchedulesTool, updateScheduleTool, deleteScheduleTool } from '../tools/schedule.js';
 import { workspace } from '../workspace.js';
 import dotenv from 'dotenv';
 
@@ -85,6 +86,10 @@ export const builtinTools = {
     update_setting: updateSettingTool,
     execute_command: overrideExecuteCommandTool,
     check_for_update: checkForUpdateTool,
+    create_schedule: createScheduleTool,
+    list_schedules: listSchedulesTool,
+    update_schedule: updateScheduleTool,
+    delete_schedule: deleteScheduleTool,
 };
 
 function mcpToolToMastraTool(mcpTool: any, client: MCPClient) {

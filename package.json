@@ -13,6 +13,8 @@
         "daemon:start": "launchctl load ~/Library/LaunchAgents/com.davidgolding.tars.plist",
         "daemon:stop": "launchctl unload ~/Library/LaunchAgents/com.davidgolding.tars.plist",
         "daemon:restart": "pnpm run daemon:stop && pnpm run build && pnpm run daemon:start",
+        "scheduler:start": "launchctl load ~/Library/LaunchAgents/com.davidgolding.tars.scheduler.plist",
+        "scheduler:stop": "launchctl unload ~/Library/LaunchAgents/com.davidgolding.tars.scheduler.plist",
         "test": "vitest run",
         "test:watch": "vitest"
     },

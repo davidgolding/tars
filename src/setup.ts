@@ -265,6 +265,61 @@ async function main() {
         } else {
             console.log(chalk.red(`Failed to load launchd agent: ${loadRes.stderr?.toString()}`));
         }
+
+        // Scheduler plist
+        const setupScheduler = await confirm({ message: 'Do you also want to enable the task scheduler (checks every 60s for due scheduled tasks)?' });
+        if (setupScheduler) {
+            const schedulerPlistName = 'com.davidgolding.tars.scheduler.plist';
+            const schedulerEntryPath = path.join(process.cwd(), 'dist', 'scheduler.js');
+
+            const schedulerPlistContent = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.davidgolding.tars.scheduler</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>${nodePath}</string>
+        <string>${schedulerEntryPath}</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>${process.cwd()}</string>
+
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>${path.join(logsDir, 'scheduler-output.log')}</string>
+    <key>StandardErrorPath</key>
+    <string>${path.join(logsDir, 'scheduler-error.log')}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+    </dict>
+</dict>
+</plist>`;
+
+            const schedulerPlistPath = path.join(agentsDir, schedulerPlistName);
+            fs.writeFileSync(schedulerPlistPath, schedulerPlistContent);
+
+            console.log(chalk.cyan(`\nLoading scheduler ${schedulerPlistName}...`));
+            spawnSync('launchctl', ['unload', schedulerPlistPath]);
+            const schedulerLoadRes = spawnSync('launchctl', ['load', schedulerPlistPath]);
+
+            if (schedulerLoadRes.status === 0) {
+                console.log(chalk.green(`✔ Scheduler is now active (runs every 60 seconds).`));
+            } else {
+                console.log(chalk.red(`Failed to load scheduler: ${schedulerLoadRes.stderr?.toString()}`));
+            }
+        }
     } else {
         console.log(chalk.green('\nSetup complete! You can run Tars manually with `pnpm run start`.'));
     }

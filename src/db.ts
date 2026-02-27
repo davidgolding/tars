@@ -34,6 +34,21 @@ export function initDb() {
     )
   `);
 
+  // Schedules table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schedules (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      task TEXT NOT NULL,
+      cron_expression TEXT,
+      next_run_at TEXT NOT NULL,
+      last_run_at TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      run_count INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
   // Initial settings
   // Ensure bootstrapped is unset if it was the legacy 'false' value
   db.exec(`
@@ -133,6 +148,58 @@ export function updateSetting(key: string, value: string): void {
 export function deleteAgentContext(category: string): void {
   const stmt = db.prepare('DELETE FROM agent_context WHERE category = ?');
   stmt.run(category);
+}
+
+// --- Schedules ---
+
+export interface Schedule {
+  id: string;
+  name: string;
+  task: string;
+  cron_expression: string | null;
+  next_run_at: string;
+  last_run_at: string | null;
+  enabled: number;
+  created_at: string;
+  run_count: number;
+}
+
+export function createSchedule(schedule: Omit<Schedule, 'last_run_at' | 'created_at' | 'run_count'>): void {
+  const stmt = db.prepare(
+    'INSERT INTO schedules (id, name, task, cron_expression, next_run_at, enabled) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  stmt.run(schedule.id, schedule.name, schedule.task, schedule.cron_expression, schedule.next_run_at, schedule.enabled);
+}
+
+export function getSchedule(id: string): Schedule | null {
+  const stmt = db.prepare('SELECT * FROM schedules WHERE id = ?');
+  return (stmt.get(id) as Schedule) ?? null;
+}
+
+export function listSchedules(): Schedule[] {
+  const stmt = db.prepare('SELECT * FROM schedules ORDER BY next_run_at ASC');
+  return stmt.all() as Schedule[];
+}
+
+export function updateSchedule(id: string, fields: Partial<Pick<Schedule, 'name' | 'task' | 'cron_expression' | 'next_run_at' | 'enabled' | 'last_run_at' | 'run_count'>>): void {
+  const sets: string[] = [];
+  const values: any[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    sets.push(`${key} = ?`);
+    values.push(value);
+  }
+  if (sets.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE schedules SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function deleteSchedule(id: string): void {
+  db.prepare('DELETE FROM schedules WHERE id = ?').run(id);
+}
+
+export function getDueSchedules(): Schedule[] {
+  const stmt = db.prepare("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at <= datetime('now')");
+  return stmt.all() as Schedule[];
 }
 
 export default db;
