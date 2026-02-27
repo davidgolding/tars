@@ -6,11 +6,23 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { spawn, exec } from 'child_process';
+import { z } from 'zod';
 import { getSetting, initDb, updateSetting, dbPath } from './db.js';
 import { uiEvents } from './signal_events.js';
 import Database from 'better-sqlite3';
 
 dotenv.config();
+
+const phoneSchema = z.string().regex(/^\+\d{10,15}$/, "Must be an E.164 formatted phone number (e.g., +1234567890)");
+
+const configSchema = z.object({
+    name: z.string().min(1).optional(),
+    apiKey: z.string().optional(),
+    model: z.string().optional(),
+    botNumber: phoneSchema,
+    targetNumber: phoneSchema,
+    promptsPath: z.string().optional(),
+});
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -48,7 +60,12 @@ async function createServer() {
 
     apiRouter.post('/config', async (req, res) => {
         try {
-            const config = req.body;
+            const validation = configSchema.safeParse(req.body);
+            if (!validation.success) {
+                return res.status(400).json({ error: 'Invalid configuration', details: validation.error.format() });
+            }
+
+            const config = validation.data;
             const envPath = path.join(process.cwd(), '.env');
             let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
 
@@ -98,6 +115,11 @@ async function createServer() {
         res.setHeader('Connection', 'keep-alive');
 
         const signal = spawn('signal-cli', ['link', '-n', 'Tars-Dashboard']);
+
+        const heartbeat = setInterval(() => {
+            res.write(': heartbeat\n\n');
+        }, 15000);
+
         signal.stdout.on('data', (data) => {
             const output = data.toString();
             const match = output.match(/tsdevice:\/\/\S+/);
@@ -114,7 +136,10 @@ async function createServer() {
             res.end();
         });
 
-        req.on('close', () => signal.kill());
+        req.on('close', () => {
+            signal.kill();
+            clearInterval(heartbeat);
+        });
     });
 
     apiRouter.get('/chat/history', (req, res) => {
@@ -138,8 +163,13 @@ async function createServer() {
 
         uiEvents.on('message', onMessage);
 
+        const heartbeat = setInterval(() => {
+            res.write(': heartbeat\n\n');
+        }, 30000);
+
         req.on('close', () => {
             uiEvents.off('message', onMessage);
+            clearInterval(heartbeat);
         });
     });
 

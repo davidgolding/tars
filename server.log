@@ -1,0 +1,10 @@
+
+> tars@1.0.0 server /Users/davidgolding/Development/tars
+> tsx src/server.ts
+
+>>> SERVER STARTING
+>>> createServer() called
+[DB] Database initialized at /Users/davidgolding/Development/tars/public/tars.db
+>>> Initializing Vite...
+>>> Vite initialized
+[Tars UI] Server running at http://localhost:5827
