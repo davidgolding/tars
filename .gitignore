@@ -14,3 +14,6 @@ skills-lock.json
 *.db-shm
 *.db-wal
 /public/.agents
+*.log
+*.png
+!public/**/*.png
