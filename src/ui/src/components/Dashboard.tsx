@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Modal } from './Modal';
 
 interface Message {
@@ -222,8 +224,43 @@ export function Dashboard() {
                   let displayContent = msg.content;
                   try {
                     const parsed = JSON.parse(msg.content);
-                    displayContent = parsed.content || displayContent;
-                  } catch (e) {}
+                    
+                    // Handle Mastra/Vercel AI SDK format (Version 2 with parts)
+                    if (parsed.parts && Array.isArray(parsed.parts)) {
+                      displayContent = parsed.parts
+                        .map((part: any) => {
+                          if (part.type === 'text') return part.text;
+                          if (part.type === 'tool-invocation') {
+                            const call = part.toolInvocation;
+                            return `\n*Executing ${call.toolName}...*\n`;
+                          }
+                          return '';
+                        })
+                        .join('');
+                    } 
+                    // Handle simple { content: "..." } format
+                    else if (parsed.content) {
+                      displayContent = parsed.content;
+                    }
+                    // Handle { text: "..." } format
+                    else if (parsed.text) {
+                      displayContent = parsed.text;
+                    }
+                    // Handle { error: "..." } or { error: { message: "..." } }
+                    else if (parsed.error) {
+                      displayContent = typeof parsed.error === 'string' 
+                        ? parsed.error 
+                        : (parsed.error.message || JSON.stringify(parsed.error));
+                    }
+                    // Handle { message: "..." }
+                    else if (parsed.message) {
+                      displayContent = parsed.message;
+                    }
+                  } catch (e) {
+                    // Not JSON, use as is
+                  }
+
+                  if (!displayContent) return null;
 
                   return (
                     <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -232,7 +269,31 @@ export function Dashboard() {
                           ? 'bg-indigo-600 text-white rounded-br-none' 
                           : 'bg-gray-800 text-gray-100 rounded-bl-none'
                       }`}>
-                         <p className="text-sm leading-relaxed whitespace-pre-wrap">{displayContent}</p>
+                         <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                           <ReactMarkdown 
+                             remarkPlugins={[remarkGfm]}
+                             components={{
+                               p: (({ children }: any) => <p className="mb-2 last:mb-0">{children}</p>) as any,
+                               ul: (({ children }: any) => <ul className="list-disc ml-4 mb-2">{children}</ul>) as any,
+                               ol: (({ children }: any) => <ol className="list-decimal ml-4 mb-2">{children}</ol>) as any,
+                               li: (({ children }: any) => <li className="mb-1">{children}</li>) as any,
+                               code: (({ children, inline }: any) => 
+                                 inline 
+                                   ? <code className="bg-black/30 rounded px-1 font-mono text-xs">{children}</code>
+                                   : <pre className="bg-black/30 rounded p-2 my-2 overflow-x-auto font-mono text-xs"><code>{children}</code></pre>) as any,
+                               h1: (({ children }: any) => <h1 className="text-lg font-bold mb-2">{children}</h1>) as any,
+                               h2: (({ children }: any) => <h2 className="text-base font-bold mb-2">{children}</h2>) as any,
+                               h3: (({ children }: any) => <h3 className="text-sm font-bold mb-2">{children}</h3>) as any,
+                               blockquote: (({ children }: any) => <blockquote className="border-l-2 border-gray-500 pl-2 italic mb-2">{children}</blockquote>) as any,
+                               a: (({ children, href }: any) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">{children}</a>) as any,
+                               table: (({ children }: any) => <div className="overflow-x-auto mb-2"><table className="border-collapse border border-gray-600 w-full text-xs">{children}</table></div>) as any,
+                               th: (({ children }: any) => <th className="border border-gray-600 px-2 py-1 bg-gray-700 font-bold">{children}</th>) as any,
+                               td: (({ children }: any) => <td className="border border-gray-600 px-2 py-1">{children}</td>) as any,
+                             }}
+                           >
+                            {displayContent}
+                           </ReactMarkdown>
+                         </div>
                          <div className={`text-[9px] mt-1 opacity-60 font-medium ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
                            {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
                          </div>
