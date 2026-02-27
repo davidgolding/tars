@@ -117,16 +117,28 @@ export function Dashboard() {
                    <p className="italic text-sm">No messages in history. Start a conversation on Signal!</p>
                 </div>
               ) : (
-                messages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 shadow-sm border ${msg.role === 'user' ? 'bg-brand text-white border-brand/20 rounded-tr-none' : 'bg-gray-800 text-gray-100 border-gray-700 rounded-tl-none'}`}>
-                       <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
-                       <div className={`text-[9px] mt-1 opacity-50 font-medium ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
-                         {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
-                       </div>
+                messages.map((msg, i) => {
+                  let displayContent = msg.content;
+                  try {
+                    const parsed = JSON.parse(msg.content);
+                    displayContent = parsed.content || displayContent;
+                  } catch (e) {}
+
+                  return (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] rounded-2xl px-4 py-2 shadow-sm ${
+                        msg.role === 'user' 
+                          ? 'bg-indigo-600 text-white rounded-br-none' 
+                          : 'bg-gray-800 text-gray-100 rounded-bl-none'
+                      }`}>
+                         <p className="text-sm leading-relaxed whitespace-pre-wrap">{displayContent}</p>
+                         <div className={`text-[9px] mt-1 opacity-60 font-medium ${msg.role === 'user' ? 'text-right' : 'text-left'}`}>
+                           {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
+                         </div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
               <div ref={chatEndRef} />
             </div>
