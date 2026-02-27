@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
+import { Modal } from './Modal';
 
 interface Message {
   id?: string;
@@ -14,6 +15,23 @@ export function Dashboard() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Modal State
+  const [modal, setModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm?: () => void;
+    type?: 'info' | 'danger' | 'success';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
+
+  const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -50,20 +68,56 @@ export function Dashboard() {
   useEffect(scrollToBottom, [messages]);
 
   const handleRestart = async () => {
-    if (!confirm('Are you sure you want to restart the entire system?')) return;
-    setIsRestarting(true);
-    try {
-      await fetch('/api/system/restart', { method: 'POST' });
-      alert('System restart initiated. Please wait a few moments and refresh.');
-    } catch (err) {
-      alert('Failed to trigger restart');
-    } finally {
-      setIsRestarting(false);
-    }
+    setModal({
+      isOpen: true,
+      title: 'Restart System',
+      message: 'Are you sure you want to restart the entire system? This will briefly disconnect all services.',
+      confirmLabel: 'Restart Now',
+      cancelLabel: 'Cancel',
+      type: 'danger',
+      onConfirm: async () => {
+        closeModal();
+        setIsRestarting(true);
+        try {
+          const res = await fetch('/api/system/restart', { method: 'POST' });
+          if (!res.ok) throw new Error('Failed to reach server');
+          
+          setModal({
+            isOpen: true,
+            title: 'Restarting...',
+            message: 'System restart initiated. The connection will drop momentarily. Please refresh in a few seconds.',
+            confirmLabel: 'Got it',
+            type: 'success',
+            onConfirm: closeModal
+          });
+        } catch (err) {
+          setModal({
+            isOpen: true,
+            title: 'Restart Failed',
+            message: 'Failed to trigger the system restart. Please check the server logs or try manually.',
+            confirmLabel: 'Close',
+            type: 'danger',
+            onConfirm: closeModal
+          });
+        } finally {
+          setIsRestarting(false);
+        }
+      }
+    });
   };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <Modal 
+        isOpen={modal.isOpen}
+        title={modal.title}
+        message={modal.message}
+        confirmLabel={modal.confirmLabel}
+        cancelLabel={modal.cancelLabel}
+        type={modal.type}
+        onConfirm={modal.onConfirm || closeModal}
+        onCancel={closeModal}
+      />
       <aside className="md:col-span-1 bg-gray-900 p-4 rounded-xl border border-gray-800 h-fit shadow-lg sticky top-24">
         <nav className="space-y-1">
           {[

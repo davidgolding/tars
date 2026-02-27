@@ -143,7 +143,7 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
           ) : signalUri && !linked ? (
             <div className="bg-white p-4 inline-block rounded-lg mb-4">
               <QRCodeSVG value={signalUri} size={256} />
-              <p className="text-black mt-2 text-sm font-medium">Scan with Signal app (Settings > Linked Devices)</p>
+              <p className="text-black mt-2 text-sm font-medium">Scan with Signal app (Settings {'>'} Linked Devices)</p>
             </div>
           ) : linked ? (
             <div className="text-green-500 mb-4">

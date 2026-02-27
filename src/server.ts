@@ -72,7 +72,7 @@ async function createServer() {
             const envPath = path.join(process.cwd(), '.env');
             let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
 
-            const updates: Record<string, string> = {
+            const updates: Record<string, string | undefined> = {
                 'BOT_SIGNAL_NUMBER': config.botNumber,
                 'TARGET_SIGNAL_NUMBER': config.targetNumber,
                 'LLM_API_KEY': config.apiKey,

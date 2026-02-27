@@ -92,7 +92,6 @@ async function main() {
                         });
                     }
                     response = result.text;
-                    const threadId = groupId ? `signal:group:${groupId}` : `signal:dm:${sender}`;
                     notifyUIMessage({ role: 'assistant', content: response, threadId });
                 } finally {
                     if (typingInterval) {
