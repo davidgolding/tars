@@ -10,11 +10,13 @@ import { z } from 'zod';
 import { getSetting, initDb, updateSetting, dbPath } from './db.js';
 import { uiEvents } from './signal_events.js';
 import { checkSignalStatus } from './signal.js';
+import { processAgentMessage } from './mastra/service.js';
 import Database from 'better-sqlite3';
 
 dotenv.config();
 
 const phoneSchema = z.string().regex(/^\+\d{10,15}$/, "Must be an E.164 formatted phone number (e.g., +1234567890)");
+const chatSchema = z.object({ content: z.string().min(1).max(2000) });
 
 const configSchema = z.object({
     name: z.string().min(1).optional(),
@@ -152,6 +154,35 @@ async function createServer() {
             res.json(messages);
         } catch (err) {
             res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    apiRouter.post('/chat/send', async (req, res) => {
+        try {
+            const { content } = chatSchema.parse(req.body);
+            const targetNumber = getSetting('TARGET_SIGNAL_NUMBER') || process.env.TARGET_SIGNAL_NUMBER;
+
+            if (!targetNumber) {
+                return res.status(400).json({ error: 'Target number not configured' });
+            }
+
+            // We process this asynchronously so the API can return quickly, 
+            // the UI will get updates via SSE
+            processAgentMessage({
+                text: content,
+                sender: targetNumber,
+                origin: 'ui'
+            }).catch(err => {
+                console.error('[API] Error in background message processing:', err);
+            });
+
+            res.json({ success: true });
+        } catch (err) {
+            if (err instanceof z.ZodError) {
+                res.status(400).json({ error: 'Invalid message', details: err.format() });
+            } else {
+                res.status(500).json({ error: (err as Error).message });
+            }
         }
     });
 

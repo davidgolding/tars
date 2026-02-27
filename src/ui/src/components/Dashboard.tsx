@@ -12,6 +12,8 @@ interface Message {
 export function Dashboard() {
   const [activeTab, setActiveTab] = useState('chat');
   const [isRestarting, setIsRestarting] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -56,7 +58,11 @@ export function Dashboard() {
     const eventSource = new EventSource('/api/chat/events');
     eventSource.onmessage = (event) => {
       const newMessage = JSON.parse(event.data);
-      setMessages(prev => [...prev, newMessage]);
+      setMessages(prev => {
+        // Prevent duplicate messages if they are already in the list
+        if (newMessage.id && prev.some(m => m.id === newMessage.id)) return prev;
+        return [...prev, newMessage];
+      });
     };
 
     return () => {
@@ -66,6 +72,47 @@ export function Dashboard() {
   }, []);
 
   useEffect(scrollToBottom, [messages]);
+
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isSending) return;
+
+    setIsSending(true);
+    const content = inputValue;
+    setInputValue('');
+
+    try {
+      const res = await fetch('/api/chat/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content })
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || 'Failed to send message');
+      }
+    } catch (err) {
+      console.error('Error sending message:', err);
+      setModal({
+        isOpen: true,
+        title: 'Message Failed',
+        message: (err as Error).message,
+        confirmLabel: 'Close',
+        type: 'danger',
+        onConfirm: closeModal
+      });
+      setInputValue(content); // Restore input on failure
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
 
   const handleRestart = async () => {
     setModal({
@@ -201,13 +248,33 @@ export function Dashboard() {
               <div className="flex gap-2 bg-gray-800/50 p-1.5 rounded-xl border border-gray-700/50">
                 <input
                   type="text"
-                  placeholder="Chat with your Signal bot from here..."
+                  placeholder={isSending ? "Tars is thinking..." : "Chat with your Signal bot from here..."}
                   className="flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none placeholder:text-gray-600"
-                  disabled
+                  value={inputValue}
+                  onInput={(e) => setInputValue((e.target as HTMLInputElement).value)}
+                  onKeyDown={handleKeyDown}
+                  disabled={isSending}
                 />
-                <button className="bg-brand/20 text-brand px-4 py-2 rounded-lg text-sm font-bold opacity-50 cursor-not-allowed">Send</button>
+                <button 
+                  onClick={handleSendMessage}
+                  disabled={isSending || !inputValue.trim()}
+                  className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                    isSending || !inputValue.trim() 
+                      ? 'bg-brand/10 text-brand/30 cursor-not-allowed' 
+                      : 'bg-brand/20 text-brand hover:bg-brand/30 active:scale-95'
+                  }`}
+                >
+                  {isSending ? (
+                    <div className="flex items-center gap-2">
+                      <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Thinking...</span>
+                    </div>
+                  ) : 'Send'}
+                </button>
               </div>
-              <p className="text-[10px] text-gray-500 mt-2 text-center">Messaging from dashboard is not yet implemented</p>
             </div>
           </>
         )}
