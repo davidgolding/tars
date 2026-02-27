@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import removeMd from 'remove-markdown';
 import { startSignalListener, sendSignalMessage, sendSignalTyping, stopSignalListener } from './signal.js';
 import { initDb, getAgentContext, getSetting } from './db.js';
+import { notifyUIMessage } from './signal_events.js';
 
 // Load environment variables
 dotenv.config();
@@ -72,6 +73,8 @@ async function main() {
                 try {
                     const threadId = groupId ? `signal:group:${groupId}` : `signal:dm:${sender}`;
 
+                    notifyUIMessage({ role: 'user', content: text, threadId });
+
                     const bootstrapVal = getSetting('bootstrapped');
                     const isBootstrapped = bootstrapVal
                         ? !isNaN(new Date(bootstrapVal).getTime()) && new Date(bootstrapVal) <= new Date()
@@ -89,6 +92,8 @@ async function main() {
                         });
                     }
                     response = result.text;
+                    const threadId = groupId ? `signal:group:${groupId}` : `signal:dm:${sender}`;
+                    notifyUIMessage({ role: 'assistant', content: response, threadId });
                 } finally {
                     if (typingInterval) {
                         clearInterval(typingInterval);
