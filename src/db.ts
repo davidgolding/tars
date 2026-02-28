@@ -14,6 +14,11 @@ const db = new Database(dbPath);
 // Enable WAL mode for better concurrency
 db.pragma('journal_mode = WAL');
 
+// Initialize schema immediately so any module-level code in importers
+// (e.g. tars.ts calling getAgentContext() during Memory construction)
+// always finds the tables present regardless of call order.
+initDb();
+
 /**
  * Initialize the database schema
  */

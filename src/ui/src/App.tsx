@@ -5,6 +5,7 @@ import { Dashboard } from './components/Dashboard';
 export function App() {
   const [status, setStatus] = useState<{ bootstrapped: boolean, timestamp?: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showDashboard, setShowDashboard] = useState(false);
 
   const fetchStatus = () => {
     fetch('/api/status')
@@ -23,9 +24,17 @@ export function App() {
     fetchStatus();
   }, []);
 
-  const handleBootstrapComplete = (timestamp: string) => {
-    setStatus({ bootstrapped: true, timestamp });
-  };
+  // Poll while waiting for bootstrapAgent to complete setup
+  useEffect(() => {
+    if (!status || status.bootstrapped) return;
+    const interval = setInterval(() => {
+      fetch('/api/status')
+        .then(res => res.json())
+        .then(data => setStatus(data))
+        .catch(() => {});
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [status?.bootstrapped]);
 
   if (loading) {
     return (
@@ -48,17 +57,17 @@ export function App() {
           </div>
           <div className="flex items-center gap-4">
             <div className={`text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded border ${status?.bootstrapped ? 'text-green-500 border-green-900/50 bg-green-900/20' : 'text-yellow-500 border-yellow-900/50 bg-yellow-900/20'}`}>
-              {status?.bootstrapped ? 'System Bootstrapped' : 'Setup Mode'}
+              {status?.bootstrapped ? 'Ready' : 'Setup Mode'}
             </div>
           </div>
         </div>
       </header>
 
       <main className="flex-1 container mx-auto p-4 md:p-8">
-        {!status?.bootstrapped ? (
-          <Wizard onComplete={handleBootstrapComplete} />
+        {(!status?.bootstrapped && !showDashboard) ? (
+          <Wizard onComplete={() => setShowDashboard(true)} />
         ) : (
-          <Dashboard />
+          <Dashboard isBootstrapped={status?.bootstrapped ?? false} />
         )}
       </main>
 

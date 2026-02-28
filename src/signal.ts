@@ -65,8 +65,8 @@ export async function sendSignalTyping(
             params.recipient = [recipientNumber];
         }
         await rpcRequest('sendTyping', params);
-    } catch (err) {
-        console.error('[Signal] Failed to send typing indicator:', err);
+    } catch {
+        // Typing indicators are best-effort; ignore failures (e.g. signal-cli not running)
     }
 }
 

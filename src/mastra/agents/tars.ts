@@ -123,7 +123,7 @@ export async function createAgents() {
         id: 'tars',
         name: 'Tars',
         instructions: buildSystemPrompt,
-        model: process.env.LLM_API_MODEL ?? 'google/gemini-2.0-flash',
+        model: process.env.LLM_API_MODEL ?? 'google/gemini-flash-latest',
         tools: { ...builtinTools, ...mcpTools },
         memory,
         workspace,
@@ -133,7 +133,7 @@ export async function createAgents() {
         id: 'bootstrap',
         name: 'Bootstrap',
         instructions: buildBootstrapPrompt,
-        model: process.env.LLM_API_LITE_MODEL ?? 'google/gemini-flash-lite-latest',
+        model: process.env.LLM_API_MODEL ?? 'google/gemini-flash-latest',
         memory,
         // Give bootstrap agent strictly what it needs to initialize context
         tools: {

@@ -78,7 +78,7 @@ async function createServer() {
                 'BOT_SIGNAL_NUMBER': config.botNumber,
                 'TARGET_SIGNAL_NUMBER': config.targetNumber,
                 'LLM_API_KEY': config.apiKey,
-                'LLM_API_MODEL': config.model || 'google/gemini-2.0-flash',
+                'LLM_API_MODEL': config.model || 'google/gemini-flash-latest',
                 'LLM_PROVIDER': config.apiKey ? 'gemini-api' : 'gemini-cli',
                 'AGENT_PROMPTS_PATH': config.promptsPath || 'agent/'
             };
@@ -125,19 +125,22 @@ async function createServer() {
             res.write(': heartbeat\n\n');
         }, 15000);
 
-        signal.stdout.on('data', (data) => {
-            const output = data.toString();
-            const match = output.match(/tsdevice:\/\/\S+/);
+        const handleSignalOutput = (output: string) => {
+            const match = output.match(/sgnl:\/\/\S+/);
             if (match) res.write(`data: ${JSON.stringify({ type: 'uri', value: match[0] })}\n\n`);
-        });
-
-        signal.stderr.on('data', (data) => {
-            const output = data.toString();
             if (output.includes('Device linked')) res.write(`data: ${JSON.stringify({ type: 'success' })}\n\n`);
-        });
+        };
+
+        signal.stdout.on('data', (data) => handleSignalOutput(data.toString()));
+        signal.stderr.on('data', (data) => handleSignalOutput(data.toString()));
 
         signal.on('close', (code) => {
-            res.write(`data: ${JSON.stringify({ type: 'close', code })}\n\n`);
+            clearInterval(heartbeat);
+            if (code === 0) {
+                res.write(`data: ${JSON.stringify({ type: 'success' })}\n\n`);
+            } else {
+                res.write(`data: ${JSON.stringify({ type: 'error', code })}\n\n`);
+            }
             res.end();
         });
 

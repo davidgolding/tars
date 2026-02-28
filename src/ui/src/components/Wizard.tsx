@@ -6,7 +6,7 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
   const [config, setConfig] = useState({
     name: 'Tars',
     apiKey: '',
-    model: 'google/gemini-2.0-flash',
+    model: 'google/gemini-flash-latest',
     botNumber: '',
     targetNumber: '',
     promptsPath: 'agent/',
@@ -18,6 +18,10 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
 
   const handleNext = () => setStep(step + 1);
   const handleBack = () => setStep(step - 1);
+
+  useEffect(() => {
+    if (step === 4) onComplete('');
+  }, [step]);
 
   const saveConfig = async () => {
     try {
@@ -44,6 +48,10 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
       } else if (data.type === 'success') {
         setLinked(true);
         eventSource.close();
+      } else if (data.type === 'error') {
+        setError(`signal-cli exited with code ${data.code}. Check that the bot number is registered.`);
+        eventSource.close();
+        setLinking(false);
       }
     };
 
@@ -54,17 +62,6 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
     };
   };
 
-  const finalize = async () => {
-    try {
-      const res = await fetch('/api/bootstrap/finalize', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        onComplete(data.timestamp);
-      }
-    } catch (err) {
-      setError('Failed to finalize bootstrap');
-    }
-  };
 
   return (
     <div className="max-w-2xl mx-auto bg-gray-900 p-8 rounded-xl shadow-2xl border border-gray-800 mt-12">
@@ -159,10 +156,8 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
       )}
 
       {step === 4 && (
-        <div className="text-center">
-          <h2 className="text-3xl font-bold mb-4">All Set!</h2>
-          <p className="text-gray-400 mb-8">Tars is configured and ready to go.</p>
-          <button onClick={finalize} className="w-full bg-brand py-3 rounded-xl text-xl font-bold">Enter Dashboard</button>
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-brand"></div>
         </div>
       )}
     </div>

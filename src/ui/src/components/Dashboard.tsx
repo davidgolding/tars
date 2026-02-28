@@ -12,7 +12,7 @@ interface Message {
   threadId?: string;
 }
 
-export function Dashboard() {
+export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
   const [activeTab, setActiveTab] = useState('chat');
   const [isRestarting, setIsRestarting] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -20,6 +20,7 @@ export function Dashboard() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Modal State
   const [modal, setModal] = useState<{
@@ -76,12 +77,26 @@ export function Dashboard() {
 
   useEffect(scrollToBottom, [messages]);
 
+  const handleTextareaInput = (e: Event) => {
+    const el = e.target as HTMLTextAreaElement;
+    setInputValue(el.value);
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
+  const resetTextarea = () => {
+    setInputValue('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isSending) return;
 
     setIsSending(true);
     const content = inputValue;
-    setInputValue('');
+    resetTextarea();
 
     try {
       const res = await fetch('/api/chat/send', {
@@ -214,11 +229,14 @@ export function Dashboard() {
 
             <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-black/20">
               {messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-gray-600 space-y-4">
-                   <div className="p-4 bg-gray-900 rounded-full border border-gray-800">
-                    <svg className="w-10 h-10 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
-                   </div>
-                   <p className="italic text-sm">No messages in history. Start a conversation on Signal!</p>
+                <div className="flex flex-col justify-end h-full pb-2">
+                  {!isBootstrapped && (
+                    <div className="flex justify-start">
+                      <div className="max-w-[85%] rounded-2xl rounded-bl-none px-4 py-3 bg-gray-800 text-gray-100 shadow-sm">
+                        <p className="text-sm leading-relaxed">Hey! Before I can help you, I need to learn a bit about you. Send me a message to kick off a short setup conversation — I'll ask your name, how you'd like to be addressed, and a few other things to get started.</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 messages.map((msg, i) => {
@@ -314,14 +332,16 @@ export function Dashboard() {
 
             <div className="p-4 bg-gray-900 border-t border-gray-800">
               <div className="flex gap-2 bg-gray-800/50 p-1.5 rounded-xl border border-gray-700/50">
-                <input
-                  type="text"
+                <textarea
+                  ref={textareaRef}
+                  rows={1}
                   placeholder={isSending ? "Tars is thinking..." : "Chat with your Signal bot from here..."}
-                  className="flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none placeholder:text-gray-600"
+                  className="flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none placeholder:text-gray-600 resize-none overflow-hidden leading-5"
                   value={inputValue}
-                  onInput={(e) => setInputValue((e.target as HTMLInputElement).value)}
+                  onInput={handleTextareaInput}
                   onKeyDown={handleKeyDown}
                   disabled={isSending}
+                  style={{ maxHeight: '160px', overflowY: inputValue.split('\n').length > 8 ? 'auto' : 'hidden' }}
                 />
                 <button 
                   onClick={handleSendMessage}
