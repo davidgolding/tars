@@ -319,6 +319,176 @@ async function createServer() {
         }, 1000);
     });
 
+    // --- Skills Management ---
+
+    const SYSTEM_SKILLS = ['find-skills', 'scheduling', 'self-update'];
+    const WORKSPACE_PATH = process.env.WORKSPACE_PATH || path.join(process.cwd(), 'public');
+    const SKILLS_DIR = path.join(WORKSPACE_PATH, '.agents', 'skills');
+    const INACTIVE_SKILLS_DIR = path.join(WORKSPACE_PATH, '.agents', 'inactive-skills');
+
+    function parseSkillMd(filePath: string, folderId: string): { name: string; description: string; content: string } {
+        try {
+            const raw = fs.readFileSync(filePath, 'utf-8');
+            const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
+            if (!match) return { name: folderId, description: '', content: raw };
+
+            const frontmatter = match[1];
+            const content = match[2].trim();
+
+            const nameMatch = frontmatter.match(/^name:\s*(.+)$/m);
+            const descMatch = frontmatter.match(/^description:\s*(.+)$/m);
+
+            return {
+                name: nameMatch ? nameMatch[1].trim() : folderId,
+                description: descMatch ? descMatch[1].trim() : '',
+                content,
+            };
+        } catch {
+            return { name: folderId, description: '', content: '' };
+        }
+    }
+
+    function isValidSkillName(name: string): boolean {
+        return !!name && !name.includes('/') && !name.includes('\\') && !name.includes('..') && !name.includes('\0');
+    }
+
+    function readSkillsFromDir(dir: string, active: boolean) {
+        fs.mkdirSync(dir, { recursive: true });
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        return entries
+            .filter(e => e.isDirectory())
+            .map(e => {
+                const skillPath = path.join(dir, e.name, 'SKILL.md');
+                const parsed = parseSkillMd(skillPath, e.name);
+                return {
+                    id: e.name,
+                    name: parsed.name,
+                    description: parsed.description,
+                    content: parsed.content,
+                    active,
+                    isSystem: SYSTEM_SKILLS.includes(e.name),
+                };
+            });
+    }
+
+    apiRouter.get('/skills', (req, res) => {
+        try {
+            const active = readSkillsFromDir(SKILLS_DIR, true);
+            const inactive = readSkillsFromDir(INACTIVE_SKILLS_DIR, false);
+            const skills = [...active, ...inactive].sort((a, b) => a.id.localeCompare(b.id));
+            res.json({ skills });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    apiRouter.post('/skills/:name/toggle', (req, res) => {
+        try {
+            const { name } = req.params;
+            if (!isValidSkillName(name)) {
+                return res.status(400).json({ error: 'Invalid skill name' });
+            }
+            if (SYSTEM_SKILLS.includes(name)) {
+                return res.status(403).json({ error: 'Cannot toggle a system skill' });
+            }
+
+            const activePath = path.join(SKILLS_DIR, name);
+            const inactivePath = path.join(INACTIVE_SKILLS_DIR, name);
+
+            if (fs.existsSync(activePath)) {
+                fs.mkdirSync(INACTIVE_SKILLS_DIR, { recursive: true });
+                fs.renameSync(activePath, inactivePath);
+                res.json({ success: true, active: false });
+            } else if (fs.existsSync(inactivePath)) {
+                fs.mkdirSync(SKILLS_DIR, { recursive: true });
+                fs.renameSync(inactivePath, activePath);
+                res.json({ success: true, active: true });
+            } else {
+                res.status(404).json({ error: 'Skill not found' });
+            }
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    apiRouter.delete('/skills/:name', (req, res) => {
+        try {
+            const { name } = req.params;
+            if (!isValidSkillName(name)) {
+                return res.status(400).json({ error: 'Invalid skill name' });
+            }
+            if (SYSTEM_SKILLS.includes(name)) {
+                return res.status(403).json({ error: 'Cannot remove a system skill' });
+            }
+
+            const activePath = path.join(SKILLS_DIR, name);
+            const inactivePath = path.join(INACTIVE_SKILLS_DIR, name);
+
+            if (fs.existsSync(activePath)) {
+                fs.rmSync(activePath, { recursive: true, force: true });
+            } else if (fs.existsSync(inactivePath)) {
+                fs.rmSync(inactivePath, { recursive: true, force: true });
+            } else {
+                return res.status(404).json({ error: 'Skill not found' });
+            }
+
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    const installSchema = z.object({ source: z.string().min(1) });
+
+    apiRouter.post('/skills/install', async (req, res) => {
+        try {
+            const { source } = installSchema.parse(req.body);
+
+            // Check for existing skill with same name (basic slug extraction)
+            const slug = source.split('/').pop()?.replace(/\.git$/, '') || source;
+            const activePath = path.join(SKILLS_DIR, slug);
+            const inactivePath = path.join(INACTIVE_SKILLS_DIR, slug);
+
+            if (fs.existsSync(activePath) || fs.existsSync(inactivePath)) {
+                return res.status(409).json({ error: `Skill "${slug}" already exists. Remove it first to reinstall.` });
+            }
+
+            // Run install command
+            await new Promise<void>((resolve, reject) => {
+                const child = exec(
+                    `npx -y @anthropic-ai/skills add ${source}`,
+                    { cwd: WORKSPACE_PATH, timeout: 60000 },
+                    (err, stdout, stderr) => {
+                        if (err) {
+                            // Clean up partial install
+                            if (fs.existsSync(activePath)) {
+                                fs.rmSync(activePath, { recursive: true, force: true });
+                            }
+                            reject(new Error(stderr || err.message));
+                        } else {
+                            resolve();
+                        }
+                    }
+                );
+            });
+
+            // Read the newly installed skill
+            const skillPath = path.join(SKILLS_DIR, slug, 'SKILL.md');
+            const parsed = parseSkillMd(skillPath, slug);
+
+            res.json({
+                success: true,
+                skill: { id: slug, name: parsed.name, description: parsed.description },
+            });
+        } catch (err) {
+            if (err instanceof z.ZodError) {
+                res.status(400).json({ error: 'Invalid request', details: err.format() });
+            } else {
+                res.status(500).json({ error: (err as Error).message });
+            }
+        }
+    });
+
     app.use('/api', apiRouter);
 
     let vite: any;
