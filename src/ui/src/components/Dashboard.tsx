@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { Modal } from './Modal';
 
 interface Message {
@@ -229,22 +230,23 @@ export function Dashboard() {
                     if (parsed.parts && Array.isArray(parsed.parts)) {
                       displayContent = parsed.parts
                         .map((part: any) => {
-                          if (part.type === 'text') return part.text;
-                          if (part.type === 'tool-invocation') {
-                            const call = part.toolInvocation;
-                            return `\n*Executing ${call.toolName}...*\n`;
+                          if (part.type === 'text') {
+                            // Strip internal metadata tags (like <working_memory_data>...</working_memory_data>)
+                            return part.text.replace(/<working_memory_data>[\s\S]*?<\/working_memory_data>/g, '').trim();
                           }
+                          // We hide tool-invocations and other parts for a cleaner UI
                           return '';
                         })
-                        .join('');
+                        .filter(Boolean)
+                        .join('\n\n');
                     } 
                     // Handle simple { content: "..." } format
                     else if (parsed.content) {
-                      displayContent = parsed.content;
+                      displayContent = parsed.content.replace(/<working_memory_data>[\s\S]*?<\/working_memory_data>/g, '').trim();
                     }
                     // Handle { text: "..." } format
                     else if (parsed.text) {
-                      displayContent = parsed.text;
+                      displayContent = parsed.text.replace(/<working_memory_data>[\s\S]*?<\/working_memory_data>/g, '').trim();
                     }
                     // Handle { error: "..." } or { error: { message: "..." } }
                     else if (parsed.error) {
@@ -260,6 +262,9 @@ export function Dashboard() {
                     // Not JSON, use as is
                   }
 
+                  // Always strip internal metadata tags if present
+                  displayContent = displayContent.replace(/<working_memory_data>[\s\S]*?<\/working_memory_data>/g, '').trim();
+
                   if (!displayContent) return null;
 
                   return (
@@ -269,18 +274,20 @@ export function Dashboard() {
                           ? 'bg-indigo-600 text-white rounded-br-none' 
                           : 'bg-gray-800 text-gray-100 rounded-bl-none'
                       }`}>
-                         <div className="text-sm leading-relaxed whitespace-pre-wrap">
+                         <div className="text-sm leading-relaxed">
                            <ReactMarkdown 
-                             remarkPlugins={[remarkGfm]}
+                             remarkPlugins={[remarkGfm, remarkBreaks]}
                              components={{
                                p: (({ children }: any) => <p className="mb-2 last:mb-0">{children}</p>) as any,
                                ul: (({ children }: any) => <ul className="list-disc ml-4 mb-2">{children}</ul>) as any,
                                ol: (({ children }: any) => <ol className="list-decimal ml-4 mb-2">{children}</ol>) as any,
                                li: (({ children }: any) => <li className="mb-1">{children}</li>) as any,
-                               code: (({ children, inline }: any) => 
-                                 inline 
-                                   ? <code className="bg-black/30 rounded px-1 font-mono text-xs">{children}</code>
-                                   : <pre className="bg-black/30 rounded p-2 my-2 overflow-x-auto font-mono text-xs"><code>{children}</code></pre>) as any,
+                               code: (({ children, className }: any) => {
+                                 const isBlock = /language-(\w+)/.test(className || '');
+                                 return isBlock 
+                                   ? <pre className="bg-black/30 rounded p-2 my-2 overflow-x-auto font-mono text-xs"><code>{children}</code></pre>
+                                   : <code className="bg-black/30 rounded px-1 font-mono text-xs">{children}</code>;
+                               }) as any,
                                h1: (({ children }: any) => <h1 className="text-lg font-bold mb-2">{children}</h1>) as any,
                                h2: (({ children }: any) => <h2 className="text-base font-bold mb-2">{children}</h2>) as any,
                                h3: (({ children }: any) => <h3 className="text-sm font-bold mb-2">{children}</h3>) as any,

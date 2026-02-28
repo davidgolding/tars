@@ -50,6 +50,7 @@
         "preact": "^10.28.4",
         "qrcode.react": "^4.2.0",
         "react-markdown": "^10.1.0",
+        "remark-breaks": "^4.0.0",
         "remark-gfm": "^4.0.1",
         "remove-markdown": "^0.6.3",
         "signal-cli": "^0.13.19",
