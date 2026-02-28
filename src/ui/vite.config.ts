@@ -20,8 +20,5 @@ export default defineConfig({
     hmr: {
       port: 24680,
     },
-    proxy: {
-      '/api': 'http://localhost:5827',
-    },
   },
 });

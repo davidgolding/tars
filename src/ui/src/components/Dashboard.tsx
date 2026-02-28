@@ -15,6 +15,7 @@ interface Message {
 export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
   const [activeTab, setActiveTab] = useState('chat');
   const [isRestarting, setIsRestarting] = useState(false);
+  const [isTogglingSignal, setIsTogglingSignal] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -38,6 +39,53 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
   });
 
   const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
+
+  const handleToggleSignal = async () => {
+    setIsTogglingSignal(true);
+    const wasOnline = !!status?.signalOnline;
+    const endpoint = wasOnline ? '/api/signal/daemon/stop' : '/api/signal/daemon/start';
+    try {
+      const res = await fetch(endpoint, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setModal({
+          isOpen: true,
+          title: 'Signal Daemon Error',
+          message: data.error || `Request failed (${res.status})`,
+          confirmLabel: 'Close',
+          type: 'danger',
+          onConfirm: closeModal,
+        });
+        setIsTogglingSignal(false);
+        return;
+      }
+      // Poll until the state flips or timeout (15s)
+      const deadline = Date.now() + 15000;
+      const pollUntilChanged = () => {
+        fetch('/api/status').then(r => r.json()).then(data => {
+          setStatus(data);
+          if (data.signalOnline !== wasOnline || Date.now() >= deadline) {
+            setIsTogglingSignal(false);
+          } else {
+            setTimeout(pollUntilChanged, 1500);
+          }
+        }).catch(() => {
+          setIsTogglingSignal(false);
+        });
+      };
+      setTimeout(pollUntilChanged, 1000);
+    } catch (err) {
+      setModal({
+        isOpen: true,
+        title: 'Signal Daemon Error',
+        message: (err as Error).message,
+        confirmLabel: 'Close',
+        type: 'danger',
+        onConfirm: closeModal,
+      });
+      setIsTogglingSignal(false);
+    }
+  };
 
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -428,9 +476,27 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
                       <span className="text-[10px] text-gray-500 font-mono">Status: {status?.signalOnline ? 'Responsive' : 'Unresponsive'}</span>
                     </div>
                   </div>
-                  <span className={`text-[10px] font-black ${status?.signalOnline ? 'text-green-500 bg-green-950/40 border-green-900/50' : 'text-red-500 bg-red-950/40 border-red-900/50'} px-3 py-1.5 rounded-lg border uppercase tracking-tighter`}>
-                    {status?.signalOnline ? 'ONLINE' : 'OFFLINE'}
-                  </span>
+                  <button
+                    onClick={handleToggleSignal}
+                    disabled={isTogglingSignal}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      status?.signalOnline
+                        ? 'text-red-400 bg-red-950/20 border-red-900/40 hover:bg-red-900/40'
+                        : 'text-green-400 bg-green-950/20 border-green-900/40 hover:bg-green-900/40'
+                    }`}
+                  >
+                    {isTogglingSignal ? (
+                      <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={status?.signalOnline ? 'M6 18L18 6M6 6l12 12' : 'M5 12h14M12 5l7 7-7 7'} />
+                      </svg>
+                    )}
+                    {isTogglingSignal ? (status?.signalOnline ? 'Stopping...' : 'Starting...') : status?.signalOnline ? 'Stop' : 'Start'}
+                  </button>
                </div>
             </div>
           </div>

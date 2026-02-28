@@ -3,13 +3,14 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { spawn, exec } from 'child_process';
 import { z } from 'zod';
 import { getSetting, initDb, updateSetting, dbPath } from './db.js';
 import { uiEvents } from './signal_events.js';
-import { checkSignalStatus } from './signal.js';
+import { checkSignalStatus, startSignalListener, stopSignalListener } from './signal.js';
 import { processAgentMessage } from './mastra/service.js';
 import Database from 'better-sqlite3';
 
@@ -150,6 +151,33 @@ async function createServer() {
         });
     });
 
+    apiRouter.post('/signal/daemon/start', async (req, res) => {
+        // Re-read .env so values written by the wizard during this session are visible
+        dotenv.config({ override: true });
+        const botNumber = getSetting('BOT_SIGNAL_NUMBER') || process.env.BOT_SIGNAL_NUMBER;
+        const targetNumber = getSetting('TARGET_SIGNAL_NUMBER') || process.env.TARGET_SIGNAL_NUMBER;
+        const targetGroup = process.env.TARGET_SIGNAL_GROUP;
+
+        if (!botNumber || !targetNumber) {
+            return res.status(400).json({ error: 'BOT_SIGNAL_NUMBER and TARGET_SIGNAL_NUMBER must be configured.' });
+        }
+
+        res.json({ success: true });
+
+        startSignalListener(botNumber, targetNumber, targetGroup, async (text, sender, groupId) => {
+            await processAgentMessage({ text, sender, groupId, origin: 'signal' });
+        }).catch(err => console.error('[Signal] Daemon start failed:', err));
+    });
+
+    apiRouter.post('/signal/daemon/stop', async (req, res) => {
+        try {
+            await stopSignalListener();
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
     apiRouter.get('/chat/history', (req, res) => {
         try {
             const db = new Database(dbPath);
@@ -208,6 +236,77 @@ async function createServer() {
             uiEvents.off('message', onMessage);
             clearInterval(heartbeat);
         });
+    });
+
+    apiRouter.post('/daemon/setup', async (req, res) => {
+        try {
+            const cwd = process.cwd();
+            const nodePath = process.execPath;
+            const entryPath = path.join(cwd, 'dist', 'index.js');
+            const agentsDir = path.join(os.homedir(), 'Library', 'LaunchAgents');
+            const logsDir = path.join(os.homedir(), 'Library', 'Logs', 'tars');
+
+            // Build if dist/index.js doesn't exist
+            if (!fs.existsSync(entryPath)) {
+                await new Promise<void>((resolve, reject) => {
+                    exec('pnpm run build', { cwd }, (err) => err ? reject(err) : resolve());
+                });
+            }
+
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.mkdirSync(logsDir, { recursive: true });
+
+            const plistContent = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.davidgolding.tars</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>${nodePath}</string>
+        <string>${entryPath}</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>${cwd}</string>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>${path.join(logsDir, 'output.log')}</string>
+    <key>StandardErrorPath</key>
+    <string>${path.join(logsDir, 'error.log')}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+    </dict>
+</dict>
+</plist>`;
+
+            const plistPath = path.join(agentsDir, 'com.davidgolding.tars.plist');
+            fs.writeFileSync(plistPath, plistContent);
+
+            // Unload any existing + load fresh
+            await new Promise<void>((resolve) => {
+                exec(`launchctl unload "${plistPath}" 2>/dev/null; launchctl load "${plistPath}"`, (err) => {
+                    if (err) console.error('[Daemon] launchctl load failed:', err);
+                    else console.log('[Daemon] Loaded launchd plist');
+                    resolve();
+                });
+            });
+
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
     });
 
     apiRouter.post('/system/restart', (req, res) => {

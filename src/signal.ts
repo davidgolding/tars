@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'node:child_process';
 
 let signalProcess: ChildProcess | null = null;
 let eventAbortController: AbortController | null = null;
+let intentionallyStopped = false;
 
 function getBaseUrl() {
     return `http://127.0.0.1:${process.env.SIGNAL_CLI_PORT || '8080'}`;
@@ -71,6 +72,7 @@ export async function sendSignalTyping(
 }
 
 export async function stopSignalListener() {
+    intentionallyStopped = true;
     if (eventAbortController) {
         eventAbortController.abort();
         eventAbortController = null;
@@ -117,9 +119,12 @@ export async function startSignalListener(
     targetGroup: string | undefined,
     onMessage: (text: string, sender: string, groupId?: string) => Promise<void>
 ) {
+    intentionallyStopped = false;
+
     if (signalProcess) {
         console.warn('[Signal] Listener already running. Closing existing process...');
         await stopSignalListener();
+        intentionallyStopped = false; // reset after the internal stop
     }
 
     console.log(`Starting Signal listener (Daemon) for bot: ${botNumber}`);
@@ -146,9 +151,13 @@ export async function startSignalListener(
     });
 
     signalProcess.on('close', (code: number | null) => {
-        console.log(`[Signal] signal-cli process exited with code ${code}. Restarting in 5 seconds...`);
         signalProcess = null;
-        setTimeout(() => startSignalListener(botNumber, targetNumber, targetGroup, onMessage), 5000);
+        if (intentionallyStopped) {
+            console.log('[Signal] signal-cli process stopped intentionally.');
+        } else {
+            console.log(`[Signal] signal-cli process exited with code ${code}. Restarting in 5 seconds...`);
+            setTimeout(() => startSignalListener(botNumber, targetNumber, targetGroup, onMessage), 5000);
+        }
     });
 
     console.log('[Signal] Waiting for daemon to be ready...');

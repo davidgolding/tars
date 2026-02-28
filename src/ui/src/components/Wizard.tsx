@@ -15,6 +15,7 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
   const [linking, setLinking] = useState(false);
   const [linked, setLinked] = useState(false);
   const [error, setError] = useState('');
+  const [settingUpDaemon, setSettingUpDaemon] = useState(false);
 
   const handleNext = () => setStep(step + 1);
   const handleBack = () => setStep(step - 1);
@@ -62,6 +63,23 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
     };
   };
 
+  const setupDaemon = async () => {
+    setSettingUpDaemon(true);
+    setError('');
+    try {
+      const res = await fetch('/api/daemon/setup', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || 'Failed to set up daemon');
+        return;
+      }
+      handleNext();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSettingUpDaemon(false);
+    }
+  };
 
   return (
     <div className="max-w-2xl mx-auto bg-gray-900 p-8 rounded-xl shadow-2xl border border-gray-800 mt-12">
@@ -150,7 +168,11 @@ export function Wizard({ onComplete }: { onComplete: (timestamp: string) => void
           ) : (
             <div className="animate-pulse text-gray-400">Waiting for QR code...</div>
           )}
-          {linked && <button onClick={handleNext} className="w-full bg-brand py-2 rounded font-bold mt-4">Continue</button>}
+          {linked && (
+            <button onClick={setupDaemon} disabled={settingUpDaemon} className="w-full bg-brand py-2 rounded font-bold mt-4 disabled:opacity-50">
+              {settingUpDaemon ? 'Setting up daemon...' : 'Continue'}
+            </button>
+          )}
           {error && <p className="text-red-500 mt-4 text-sm">{error}</p>}
         </div>
       )}
