@@ -14,6 +14,7 @@ import { getSettingTool, updateSettingTool } from '../tools/setting.js';
 import { overrideExecuteCommandTool } from '../tools/execute.js';
 import { checkForUpdateTool } from '../tools/update.js';
 import { createScheduleTool, listSchedulesTool, updateScheduleTool, deleteScheduleTool } from '../tools/schedule.js';
+import { listPluginsTool, togglePluginTool, getPluginConfigTool } from '../tools/plugins.js';
 import { workspace } from '../workspace.js';
 import dotenv from 'dotenv';
 
@@ -90,6 +91,9 @@ export const builtinTools = {
     list_schedules: listSchedulesTool,
     update_schedule: updateScheduleTool,
     delete_schedule: deleteScheduleTool,
+    list_plugins: listPluginsTool,
+    toggle_plugin: togglePluginTool,
+    get_plugin_config: getPluginConfigTool,
 };
 
 function mcpToolToMastraTool(mcpTool: any, client: MCPClient) {

@@ -8,16 +8,18 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { spawn, exec } from 'child_process';
 import { z } from 'zod';
-import { getSetting, initDb, updateSetting, dbPath } from './db.js';
+import { getSetting, initDb, updateSetting, dbPath, getPluginConfig } from './db.js';
 import { uiEvents } from './signal_events.js';
 import { checkSignalStatus, startSignalListener, stopSignalListener } from './signal.js';
 import { processAgentMessage } from './mastra/service.js';
+import { channelManager } from './plugins/channel-manager.js';
 import Database from 'better-sqlite3';
 
 dotenv.config();
 
 const phoneSchema = z.string().regex(/^\+\d{10,15}$/, "Must be an E.164 formatted phone number (e.g., +1234567890)");
 const chatSchema = z.object({ content: z.string().min(1).max(2000) });
+const pluginIdSchema = z.string().regex(/^[a-z0-9-]+$/, "Plugin ID must be lowercase alphanumeric with dashes");
 
 const configSchema = z.object({
     name: z.string().min(1).optional(),
@@ -27,6 +29,28 @@ const configSchema = z.object({
     targetNumber: phoneSchema,
     promptsPath: z.string().optional(),
 });
+
+// Authentication middleware for plugin management
+// In production, this should use a proper auth system. For now, require an API key.
+const requirePluginAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const apiKey = req.headers['x-api-key'] as string | undefined;
+    const expectedKey = process.env.TARS_ADMIN_API_KEY;
+    
+    // If no admin key configured, require local requests only
+    if (!expectedKey) {
+        const clientIp = req.ip || req.socket.remoteAddress || '';
+        const isLocal = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === '::ffff:127.0.0.1';
+        if (!isLocal) {
+            return res.status(401).json({ error: 'Plugin management requires authentication. Set TARS_ADMIN_API_KEY env variable.' });
+        }
+        return next();
+    }
+    
+    if (!apiKey || apiKey !== expectedKey) {
+        return res.status(401).json({ error: 'Invalid API key' });
+    }
+    next();
+};
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.NODE_ENV === 'production';
@@ -489,6 +513,167 @@ async function createServer() {
         }
     });
 
+    // Plugin API endpoints
+    const PLUGINS_DIR = path.join(WORKSPACE_PATH, '.agents', 'plugins');
+
+    apiRouter.get('/plugins', (req, res) => {
+        try {
+            const plugins = channelManager.listPlugins();
+            
+            // Enrich with status and schema
+            const enrichedPlugins = plugins.map(p => {
+                const status = channelManager.getPluginStatus(p.id);
+                let schema = null;
+                const schemaPath = path.join(PLUGINS_DIR, p.id, 'schema.json');
+                if (fs.existsSync(schemaPath)) {
+                    try {
+                        schema = JSON.parse(fs.readFileSync(schemaPath, 'utf-8'));
+                    } catch {}
+                }
+                return { ...p, status, schema };
+            });
+            
+            res.json({ plugins: enrichedPlugins });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    apiRouter.post('/plugins/:id/toggle', requirePluginAuth, async (req, res) => {
+        try {
+            const id = req.params.id as string;
+            const validation = pluginIdSchema.safeParse(id);
+            if (!validation.success) {
+                return res.status(400).json({ error: 'Invalid plugin ID' });
+            }
+            
+            const plugin = channelManager.getPlugin(id);
+            
+            if (!plugin) {
+                return res.status(404).json({ error: 'Plugin not found' });
+            }
+
+            const status = channelManager.getPluginStatus(id);
+            if (status.online) {
+                await channelManager.stopPlugin(id);
+                res.json({ success: true, enabled: false });
+            } else {
+                await channelManager.startPlugin(id);
+                res.json({ success: true, enabled: true });
+            }
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    apiRouter.get('/plugins/:id/config', requirePluginAuth, (req, res) => {
+        try {
+            const id = req.params.id as string;
+            const validation = pluginIdSchema.safeParse(id);
+            if (!validation.success) {
+                return res.status(400).json({ error: 'Invalid plugin ID' });
+            }
+            
+            const config = getPluginConfig(id) || {};
+            res.json({ config });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    apiRouter.put('/plugins/:id/config', requirePluginAuth, async (req, res) => {
+        try {
+            const id = req.params.id as string;
+            const validation = pluginIdSchema.safeParse(id);
+            if (!validation.success) {
+                return res.status(400).json({ error: 'Invalid plugin ID' });
+            }
+            
+            const { config } = req.body;
+            
+            if (!config || typeof config !== 'object') {
+                return res.status(400).json({ error: 'Invalid config' });
+            }
+
+            await channelManager.updatePluginConfig(id, config);
+            res.json({ success: true });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    apiRouter.post('/plugins/install', requirePluginAuth, async (req, res) => {
+        try {
+            const { source } = req.body;
+            if (!source) {
+                return res.status(400).json({ error: 'Source URL is required' });
+            }
+
+            // Strict GitHub URL validation
+            const githubUrlSchema = z.string()
+                .url()
+                .regex(/^https:\/\/github\.com\/[a-zA-Z0-9-]+\/[a-zA-Z0-9-._]+$/);
+            
+            const urlValidation = githubUrlSchema.safeParse(source);
+            if (!urlValidation.success) {
+                return res.status(400).json({ error: 'Invalid GitHub URL format. Must be https://github.com/owner/repo' });
+            }
+
+            // Extract repo info from URL
+            const repoMatch = source.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
+            if (!repoMatch) {
+                return res.status(400).json({ error: 'Invalid GitHub URL' });
+            }
+
+            const [, owner, repo] = repoMatch;
+            const pluginId = repo.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+            const targetDir = path.join(PLUGINS_DIR, pluginId);
+
+            if (fs.existsSync(targetDir)) {
+                return res.status(409).json({ error: `Plugin "${pluginId}" already installed` });
+            }
+
+            // Clone the repo with timeout
+            fs.mkdirSync(targetDir, { recursive: true });
+            await new Promise<void>((resolve, reject) => {
+                const git = spawn('git', ['clone', '--depth', '1', source, targetDir]);
+                const timeout = setTimeout(() => {
+                    git.kill();
+                    reject(new Error('Git clone timed out after 60 seconds'));
+                }, 60000);
+                git.on('close', (code) => {
+                    clearTimeout(timeout);
+                    if (code === 0) resolve();
+                    else reject(new Error(`git clone failed with code ${code}`));
+                });
+            });
+
+            // Check for package.json and install deps with --ignore-scripts for security
+            const pkgJsonPath = path.join(targetDir, 'package.json');
+            if (fs.existsSync(pkgJsonPath)) {
+                await new Promise<void>((resolve, reject) => {
+                    const npm = spawn('npm', ['install', '--ignore-scripts'], { cwd: targetDir });
+                    const timeout = setTimeout(() => {
+                        npm.kill();
+                        reject(new Error('npm install timed out after 120 seconds'));
+                    }, 120000);
+                    npm.on('close', (code) => {
+                        clearTimeout(timeout);
+                        if (code === 0) resolve();
+                        else reject(new Error(`npm install failed with code ${code}`));
+                    });
+                });
+            }
+
+            // Reload plugins
+            await channelManager.loadPlugins();
+
+            res.json({ success: true, plugin: { id: pluginId, name: pluginId } });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
     app.use('/api', apiRouter);
 
     let vite: any;
@@ -525,6 +710,10 @@ async function createServer() {
             next(e);
         }
     });
+
+    // Load channel plugins
+    console.log('[Tars UI] Loading channel plugins...');
+    await channelManager.loadPlugins();
 
     app.listen(PORT, () => {
         console.log(`[Tars UI] Server running at http://localhost:${PORT}`);

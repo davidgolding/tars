@@ -3,6 +3,7 @@ import removeMd from 'remove-markdown';
 import { startSignalListener, sendSignalMessage, sendSignalTyping, stopSignalListener } from './signal.js';
 import { initDb, getAgentContext, getSetting } from './db.js';
 import { notifyUIMessage } from './signal_events.js';
+import { channelManager } from './plugins/channel-manager.js';
 
 // Load environment variables
 dotenv.config();
@@ -27,18 +28,24 @@ const MAX_ITERATIONS = parseInt(process.env.LLM_MAX_ITERATIONS || '35', 10);
 process.on('SIGINT', async () => {
     console.log('\n[System] Received SIGINT. Shutting down gracefully...');
     await stopSignalListener();
+    await channelManager.shutdown();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
     console.log('\n[System] Received SIGTERM. Shutting down gracefully...');
     await stopSignalListener();
+    await channelManager.shutdown();
     process.exit(0);
 });
 
 async function main() {
     console.log("Starting Tars...");
     initDb();
+
+    // Load channel plugins
+    console.log("[System] Loading channel plugins...");
+    await channelManager.loadPlugins();
 
     // Import tarsAgent after DB is initialized (buildSystemPrompt reads from DB)
     const { tarsAgent, bootstrapAgent } = await import('./mastra/index.js');

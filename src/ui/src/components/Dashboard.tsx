@@ -21,6 +21,20 @@ interface Skill {
   isSystem: boolean;
 }
 
+interface ChannelPlugin {
+  id: string;
+  name: string;
+  type: 'channel' | 'adapter';
+  version: string;
+  enabled: boolean;
+  installedAt: string;
+  status?: {
+    online: boolean;
+    lastError?: string;
+  };
+  schema?: Record<string, any>;
+}
+
 const markdownComponents = {
   p: (({ children }: any) => <p className="mb-2 last:mb-0">{children}</p>) as any,
   ul: (({ children }: any) => <ul className="list-disc ml-4 mb-2">{children}</ul>) as any,
@@ -62,6 +76,15 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
   const [isInstalling, setIsInstalling] = useState(false);
   const [showRawContent, setShowRawContent] = useState(false);
   const [restartNeeded, setRestartNeeded] = useState(false);
+
+  // Channels state
+  const [channels, setChannels] = useState<ChannelPlugin[]>([]);
+  const [selectedChannel, setSelectedChannel] = useState<ChannelPlugin | null>(null);
+  const [isLoadingChannels, setIsLoadingChannels] = useState(false);
+  const [togglingChannel, setTogglingChannel] = useState<string | null>(null);
+  const [channelConfig, setChannelConfig] = useState<Record<string, string>>({});
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [channelInstallInput, setChannelInstallInput] = useState('');
 
   // Modal State
   const [modal, setModal] = useState<{
@@ -237,6 +260,132 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
     }
   };
 
+  // --- Channel handlers ---
+
+  const fetchChannels = async () => {
+    setIsLoadingChannels(true);
+    try {
+      const res = await fetch('/api/plugins');
+      const data = await res.json();
+      if (data.plugins) setChannels(data.plugins);
+    } catch (err) {
+      console.error('Failed to fetch channels:', err);
+    } finally {
+      setIsLoadingChannels(false);
+    }
+  };
+
+  const handleToggleChannel = async (channel: ChannelPlugin) => {
+    setTogglingChannel(channel.id);
+    try {
+      const res = await fetch(`/api/plugins/${channel.id}/toggle`, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setModal({
+          isOpen: true,
+          title: 'Toggle Failed',
+          message: data.error || `Request failed (${res.status})`,
+          confirmLabel: 'Close',
+          type: 'danger',
+          onConfirm: closeModal,
+        });
+        return;
+      }
+      await fetchChannels();
+    } catch (err) {
+      setModal({
+        isOpen: true,
+        title: 'Toggle Failed',
+        message: (err as Error).message,
+        confirmLabel: 'Close',
+        type: 'danger',
+        onConfirm: closeModal,
+      });
+    } finally {
+      setTogglingChannel(null);
+    }
+  };
+
+  const handleSaveChannelConfig = async (channelId: string) => {
+    setIsSavingConfig(true);
+    try {
+      const res = await fetch(`/api/plugins/${channelId}/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config: channelConfig }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to save config');
+      }
+      setModal({
+        isOpen: true,
+        title: 'Config Saved',
+        message: 'Channel configuration saved successfully.',
+        confirmLabel: 'OK',
+        type: 'success',
+        onConfirm: closeModal,
+      });
+    } catch (err) {
+      setModal({
+        isOpen: true,
+        title: 'Save Failed',
+        message: (err as Error).message,
+        confirmLabel: 'Close',
+        type: 'danger',
+        onConfirm: closeModal,
+      });
+    } finally {
+      setIsSavingConfig(false);
+    }
+  };
+
+  const handleInstallChannel = async () => {
+    if (!channelInstallInput.trim() || isInstalling) return;
+    setIsInstalling(true);
+    try {
+      const res = await fetch('/api/plugins/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: channelInstallInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.status === 409) {
+        setModal({
+          isOpen: true,
+          title: 'Already Exists',
+          message: data.error,
+          confirmLabel: 'Close',
+          type: 'info',
+          onConfirm: closeModal,
+        });
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || 'Install failed');
+      setChannelInstallInput('');
+      await fetchChannels();
+      setModal({
+        isOpen: true,
+        title: 'Channel Installed',
+        message: `"${data.plugin?.name || channelInstallInput}" has been installed successfully.`,
+        confirmLabel: 'OK',
+        type: 'success',
+        onConfirm: closeModal,
+      });
+    } catch (err) {
+      setModal({
+        isOpen: true,
+        title: 'Install Failed',
+        message: (err as Error).message,
+        confirmLabel: 'Close',
+        type: 'danger',
+        onConfirm: closeModal,
+      });
+    } finally {
+      setIsInstalling(false);
+    }
+  };
+
   // --- Signal / Chat handlers ---
 
   const handleToggleSignal = async () => {
@@ -324,6 +473,7 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
   // Refetch skills when switching to the skills tab
   useEffect(() => {
     if (activeTab === 'skills') fetchSkills();
+    if (activeTab === 'channels') fetchChannels();
   }, [activeTab]);
 
   useEffect(scrollToBottom, [messages]);
@@ -654,6 +804,167 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
     );
   };
 
+  const renderChannelsList = () => (
+    <div className="p-8">
+      <h2 className="text-2xl font-bold mb-8 border-b border-gray-800 pb-4 flex items-center gap-3">
+        <svg className="w-6 h-6 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+        </svg>
+        Channels
+      </h2>
+
+      {/* Install input */}
+      <div className="mb-6 flex gap-2">
+        <input
+          type="text"
+          placeholder="Install channel by GitHub URL..."
+          value={channelInstallInput}
+          onInput={(e) => setChannelInstallInput((e.target as HTMLInputElement).value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleInstallChannel(); }}
+          disabled={isInstalling}
+          className="flex-1 bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand/50 placeholder:text-gray-600 disabled:opacity-50"
+        />
+        <button
+          onClick={handleInstallChannel}
+          disabled={isInstalling || !channelInstallInput.trim()}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-green-400 bg-green-950/20 border-green-900/40 hover:bg-green-900/40`}
+        >
+          {isInstalling ? <SpinnerIcon /> : null}
+          {isInstalling ? 'Installing...' : 'Add'}
+        </button>
+      </div>
+
+      {/* Channels list */}
+      {isLoadingChannels && channels.length === 0 ? (
+        <div className="space-y-3">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="animate-pulse bg-gray-800/50 rounded-xl h-16 border border-gray-800" />
+          ))}
+        </div>
+      ) : channels.length === 0 ? (
+        <div className="text-center py-16 text-gray-500">
+          <svg className="w-12 h-12 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          <p className="text-sm">No channels installed. Use the input above to add one.</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {channels.map(channel => (
+            <div
+              key={channel.id}
+              onClick={() => { setSelectedChannel(channel); setChannelConfig({}); }}
+              className="flex items-center justify-between p-4 bg-gray-800/30 rounded-xl border border-gray-800 hover:border-gray-700 transition-colors cursor-pointer group"
+            >
+              <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${channel.status?.online ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500'}`} />
+                <div className="min-w-0">
+                  <span className="block font-bold text-sm truncate group-hover:text-brand transition-colors">{channel.name}</span>
+                  <span className="block text-[11px] text-gray-500 truncate">v{channel.version}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 ml-3" onClick={(e) => e.stopPropagation()}>
+                <button
+                  onClick={() => handleToggleChannel(channel)}
+                  disabled={togglingChannel === channel.id}
+                  className={`flex items-center gap-1.5 px-2 py-1 text-[10px] rounded-lg font-bold border transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    channel.status?.online
+                      ? 'text-red-400 bg-red-950/20 border-red-900/40 hover:bg-red-900/40'
+                      : 'text-green-400 bg-green-950/20 border-green-900/40 hover:bg-green-900/40'
+                  }`}
+                >
+                  {togglingChannel === channel.id ? <SpinnerIcon /> : null}
+                  {togglingChannel === channel.id ? (channel.status?.online ? 'Stopping...' : 'Starting...') : channel.status?.online ? 'Disable' : 'Enable'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderChannelDetail = () => {
+    if (!selectedChannel) return null;
+    const channel = channels.find(c => c.id === selectedChannel.id) || selectedChannel;
+
+    return (
+      <div className="p-8">
+        <button
+          onClick={() => setSelectedChannel(null)}
+          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-200 transition-colors mb-6"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+          </svg>
+          Back to Channels
+        </button>
+
+        <div className="flex items-start justify-between mb-6 border-b border-gray-800 pb-6">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-3 mb-1">
+              <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${channel.status?.online ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500'}`} />
+              <h2 className="text-2xl font-bold truncate">{channel.name}</h2>
+            </div>
+            <p className="text-sm text-gray-400 mt-1 ml-[22px]">Version {channel.version}</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-4">
+            <button
+              onClick={() => handleToggleChannel(channel)}
+              disabled={togglingChannel === channel.id}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border transition-all active:scale-95 disabled:opacity-50 ${
+                channel.status?.online
+                  ? 'text-red-400 bg-red-950/20 border-red-900/40 hover:bg-red-900/40'
+                  : 'text-green-400 bg-green-950/20 border-green-900/40 hover:bg-green-900/40'
+              }`}
+            >
+              {togglingChannel === channel.id ? <SpinnerIcon /> : null}
+              {togglingChannel === channel.id ? (channel.status?.online ? 'Stopping...' : 'Starting...') : channel.status?.online ? 'Disable' : 'Enable'}
+            </button>
+          </div>
+        </div>
+
+        {channel.schema ? (
+          <div>
+            <h3 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-4">Configuration</h3>
+            <div className="space-y-4">
+              {Object.entries(channel.schema.properties || {}).map(([key, prop]: [string, any]) => (
+                <div key={key}>
+                  <label className="block text-xs font-bold text-gray-400 mb-2">
+                    {prop.title || key}
+                    {(channel.schema?.required || []).includes(key) && <span className="text-red-400 ml-1">*</span>}
+                  </label>
+                  <input
+                    type={prop.type === 'number' ? 'number' : 'text'}
+                    value={channelConfig[key] || ''}
+                    onInput={(e) => setChannelConfig({ ...channelConfig, [key]: (e.target as HTMLInputElement).value })}
+                    placeholder={prop.description || ''}
+                    className="w-full bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand/50"
+                  />
+                  {prop.description && (
+                    <p className="text-[10px] text-gray-500 mt-1">{prop.description}</p>
+                  )}
+                </div>
+              ))}
+              <button
+                onClick={() => handleSaveChannelConfig(channel.id)}
+                disabled={isSavingConfig}
+                className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold text-green-400 bg-green-950/20 border border-green-900/40 hover:bg-green-900/40 transition-all active:scale-95 disabled:opacity-50"
+              >
+                {isSavingConfig ? <SpinnerIcon /> : null}
+                {isSavingConfig ? 'Saving...' : 'Save Configuration'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500 text-sm">
+            No configuration schema available for this channel.
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
       <Modal
@@ -671,6 +982,7 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
           {[
             { id: 'chat', label: 'Chat Mirror', icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z' },
             { id: 'skills', label: 'Skills', icon: 'M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z' },
+            { id: 'channels', label: 'Channels', icon: 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z' },
             { id: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z' },
             { id: 'health', label: 'System Health', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' }
           ].map(tab => (
@@ -823,6 +1135,10 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
 
         {activeTab === 'skills' && (
           selectedSkill ? renderSkillDetail() : renderSkillsList()
+        )}
+
+        {activeTab === 'channels' && (
+          selectedChannel ? renderChannelDetail() : renderChannelsList()
         )}
 
         {activeTab === 'settings' && (

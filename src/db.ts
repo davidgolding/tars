@@ -54,6 +54,27 @@ export function initDb() {
     )
   `);
 
+  // Plugins table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS plugins (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      version TEXT,
+      enabled INTEGER DEFAULT 0,
+      installed_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Plugin config table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS plugin_config (
+      plugin_id TEXT PRIMARY KEY,
+      config TEXT NOT NULL,
+      FOREIGN KEY (plugin_id) REFERENCES plugins(id)
+    )
+  `);
+
   // Initial settings
   // Ensure bootstrapped is unset if it was the legacy 'false' value
   db.exec(`
@@ -205,6 +226,79 @@ export function deleteSchedule(id: string): void {
 export function getDueSchedules(): Schedule[] {
   const stmt = db.prepare("SELECT * FROM schedules WHERE enabled = 1 AND next_run_at <= datetime('now')");
   return stmt.all() as Schedule[];
+}
+
+// --- Plugins ---
+
+export interface DbPlugin {
+  id: string;
+  name: string;
+  type: 'channel' | 'adapter';
+  version: string;
+  enabled: number;
+  installed_at: string;
+}
+
+export interface DbPluginConfig {
+  plugin_id: string;
+  config: string;
+}
+
+export function getPlugin(id: string): DbPlugin | null {
+  const stmt = db.prepare('SELECT * FROM plugins WHERE id = ?');
+  return (stmt.get(id) as DbPlugin) ?? null;
+}
+
+export function listPlugins(): DbPlugin[] {
+  const stmt = db.prepare('SELECT * FROM plugins ORDER BY name');
+  return stmt.all() as DbPlugin[];
+}
+
+export function listEnabledPlugins(): DbPlugin[] {
+  const stmt = db.prepare('SELECT * FROM plugins WHERE enabled = 1 ORDER BY name');
+  return stmt.all() as DbPlugin[];
+}
+
+export function createPlugin(plugin: Omit<DbPlugin, 'installed_at'>): void {
+  const stmt = db.prepare(
+    'INSERT INTO plugins (id, name, type, version, enabled) VALUES (?, ?, ?, ?, ?)'
+  );
+  stmt.run(plugin.id, plugin.name, plugin.type, plugin.version, plugin.enabled);
+}
+
+export function updatePlugin(id: string, fields: Partial<Pick<DbPlugin, 'name' | 'type' | 'version' | 'enabled'>>): void {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    sets.push(`${key} = ?`);
+    values.push(value);
+  }
+  if (sets.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE plugins SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function deletePlugin(id: string): void {
+  db.prepare('DELETE FROM plugin_config WHERE plugin_id = ?').run(id);
+  db.prepare('DELETE FROM plugins WHERE id = ?').run(id);
+}
+
+export function getPluginConfig(pluginId: string): Record<string, string> | null {
+  const stmt = db.prepare('SELECT config FROM plugin_config WHERE plugin_id = ?');
+  const row = stmt.get(pluginId) as { config: string } | undefined;
+  if (!row) return null;
+  try {
+    return JSON.parse(row.config);
+  } catch {
+    return null;
+  }
+}
+
+export function setPluginConfig(pluginId: string, config: Record<string, string>): void {
+  const stmt = db.prepare(
+    'INSERT INTO plugin_config (plugin_id, config) VALUES (?, ?) ON CONFLICT(plugin_id) DO UPDATE SET config=excluded.config'
+  );
+  stmt.run(pluginId, JSON.stringify(config));
 }
 
 export default db;
