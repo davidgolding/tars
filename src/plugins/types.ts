@@ -28,11 +28,19 @@ export interface Plugin {
   getStatus(): PluginStatus;
 }
 
+export interface PluginSetupRoute {
+  method: 'get' | 'post';
+  path: string;
+  handler: (req: any, res: any) => void;
+}
+
 export interface ChannelPlugin extends Plugin {
   type: 'channel';
   send(recipient: string, message: string): Promise<void>;
+  sendTyping?(recipient: string, isTyping: boolean, metadata?: Record<string, unknown>): Promise<void>;
   onMessage(handler: MessageHandler): void;
   getChannelId(): string;
+  getSetupRoutes?(): PluginSetupRoute[];
 }
 
 export interface PluginManifest {

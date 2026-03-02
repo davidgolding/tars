@@ -1,16 +1,14 @@
 import removeMd from 'remove-markdown';
 import { tarsAgent, bootstrapAgent } from './index.js';
 import { getSetting, getAgentContext } from '../db.js';
-import { notifyUIMessage } from '../signal_events.js';
-import { sendSignalTyping, sendSignalMessage } from '../signal.js';
+import { notifyUIMessage } from '../events.js';
 import { channelManager } from '../plugins/channel-manager.js';
 
-const BOT_SIGNAL_NUMBER = process.env.BOT_SIGNAL_NUMBER;
-const TARGET_SIGNAL_NUMBER = process.env.TARGET_SIGNAL_NUMBER;
 const MAX_ITERATIONS = parseInt(process.env.LLM_MAX_ITERATIONS || '35', 10);
 
-export function getThreadId(sender: string, groupId?: string): string {
-  return groupId ? `signal:group:${groupId}` : `signal:dm:${sender}`;
+export function getThreadId(channelId: string, sender: string, metadata?: Record<string, unknown>): string {
+  const groupId = metadata?.groupId as string | undefined;
+  return groupId ? `${channelId}:group:${groupId}` : `${channelId}:dm:${sender}`;
 }
 
 export function getAgentName(): string {
@@ -30,30 +28,30 @@ export function getAgentName(): string {
 export async function processAgentMessage({
   text,
   sender,
-  groupId,
-  origin = 'signal'
+  channelId,
+  metadata,
 }: {
   text: string;
   sender: string;
-  groupId?: string;
-  origin?: string; // channelId - 'signal', 'discord', etc.
+  channelId: string;
+  metadata?: Record<string, unknown>;
 }) {
-  const threadId = getThreadId(sender, groupId);
-  console.log(`[Tars] Processing message from ${origin} (${sender})...`);
+  const threadId = getThreadId(channelId, sender, metadata);
+  console.log(`[Tars] Processing message from ${channelId} (${sender})...`);
 
+  const plugin = channelManager.getPlugin(channelId);
   let typingInterval: NodeJS.Timeout | null = null;
-  
+
   try {
-    // 1. Typing indicators (Signal only for now)
-    if (origin === 'signal') {
+    // 1. Typing indicators
+    if (plugin?.sendTyping) {
       typingInterval = setInterval(async () => {
-        await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, true, groupId);
+        await plugin.sendTyping!(sender, true, metadata);
       }, 12000);
-      await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, true, groupId);
+      await plugin.sendTyping(sender, true, metadata);
     }
 
-    // 2. Notify UI of User Message (if it didn't come from UI already)
-    // Actually, we'll always notify so the mirror stays in sync
+    // 2. Notify UI
     notifyUIMessage({ role: 'user', content: text, threadId });
 
     // 3. Generate Response
@@ -65,7 +63,7 @@ export async function processAgentMessage({
     let result;
     if (isBootstrapped) {
       result = await tarsAgent.generate(text, {
-        memory: { thread: threadId, resource: TARGET_SIGNAL_NUMBER! },
+        memory: { thread: threadId, resource: sender },
         maxSteps: MAX_ITERATIONS,
       });
     } else {
@@ -75,8 +73,8 @@ export async function processAgentMessage({
     }
 
     const response = result.text;
-    
-    // 4. Notify UI of Assistant Response
+
+    // 4. Notify UI
     notifyUIMessage({ role: 'assistant', content: response, threadId });
 
     // 5. Send response to the originating channel
@@ -85,23 +83,15 @@ export async function processAgentMessage({
     const prefix = `${name}: `;
     plainResponse = prefix + plainResponse;
 
-    if (origin === 'signal') {
-      const textStyles = [`0:${prefix.length}:BOLD`];
-      await sendSignalMessage(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, plainResponse, groupId, textStyles);
+    if (plugin) {
+      await plugin.send(sender, plainResponse);
     } else {
-      // Route to other channels via ChannelManager
-      const channel = channelManager.getPlugin(origin);
-      if (channel) {
-        await channel.send(sender, plainResponse);
-      } else {
-        console.warn(`[Tars] Channel ${origin} not found, cannot send response`);
-      }
+      console.warn(`[Tars] Channel ${channelId} not found, cannot send response`);
     }
-
   } catch (err: any) {
-    console.error("[Tars] Error processing message:", err);
-    
-    let userErrorMessage = "Sorry, an internal error occurred.";
+    console.error('[Tars] Error processing message:', err);
+
+    let userErrorMessage = 'Sorry, an internal error occurred.';
     if (err && err.message) {
       try {
         const jsonStart = err.message.indexOf('{');
@@ -120,27 +110,18 @@ export async function processAgentMessage({
       }
     }
 
-    if (origin === 'signal') {
-      const name = getAgentName();
-      const prefix = `${name}: `;
-      const textStyles = [`0:${prefix.length}:BOLD`];
-      await sendSignalMessage(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, prefix + userErrorMessage, groupId, textStyles);
-    } else {
-      const channel = channelManager.getPlugin(origin);
-      if (channel) {
-        await channel.send(sender, userErrorMessage);
-      }
+    if (plugin) {
+      await plugin.send(sender, userErrorMessage);
     }
-    
-    // Also notify UI of error if needed
+
     notifyUIMessage({ role: 'assistant', content: `Error: ${userErrorMessage}`, threadId });
-    throw err; // Re-throw for API to handle
+    throw err;
   } finally {
     if (typingInterval) {
       clearInterval(typingInterval);
     }
-    if (origin === 'signal') {
-      await sendSignalTyping(BOT_SIGNAL_NUMBER!, TARGET_SIGNAL_NUMBER!, false, groupId);
+    if (plugin?.sendTyping) {
+      await plugin.sendTyping(sender, false, metadata);
     }
   }
 }

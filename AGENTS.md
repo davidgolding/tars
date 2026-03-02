@@ -4,7 +4,7 @@ This file provides guidance to agents when working with code in this repository.
 
 ## What This Is
 
-Tars is a local-first AI agent that operates over Signal. It uses Google Gemini (`@ai-sdk/google` + `LLM_API_KEY`) as the LLM backend and runs entirely on the local machine. The agent communicates exclusively via Signal messages, using signal-cli as a subprocess daemon. The agent infrastructure is built on Mastra (agent, memory, tools).
+Tars is a local-first AI agent with a plugin-based channel system. It uses Google Gemini (`@ai-sdk/google` + `LLM_API_KEY`) as the LLM backend and runs entirely on the local machine. The agent communicates via channel plugins (e.g., Signal, installed from the `tars-plugins` marketplace). The agent infrastructure is built on Mastra (agent, memory, tools).
 
 ## Commands
 
@@ -50,8 +50,9 @@ Top-level files define how your Mastra project is configured, built, and connect
 | File                  | Description                                                                                                       |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `src/mastra/index.ts` | Central entry point where you configure and initialize Mastra.                                                    |
-| `src/index.ts`        | Main application entry point that wires up the database, Mastra agent, and message handlers.                      |
-| `src/signal.ts`       | Manages the `signal-cli` subprocess, handles SSE stream connections, and processes incoming/outgoing messages.    |
+| `src/index.ts`        | Main application entry point that wires up the database, Mastra agent, and channel plugins.                       |
+| `src/events.ts`       | EventEmitter for UI message notifications (SSE).                                                                  |
+| `src/plugins/`        | Plugin system: `channel-manager.ts` (loads/starts plugins), `marketplace.ts` (registry fetch/install), `types.ts`.|
 | `src/mcp.ts`          | Configures and starts the Model Context Protocol (MCP) server for tool sharing.                                   |
 | `src/db.ts`           | Database configuration and initialization for storing message history and agent state.                            |
 | `src/setup.ts`        | Script for initial environment setup and configuration.                                                           |
@@ -64,13 +65,14 @@ Top-level files define how your Mastra project is configured, built, and connect
 ### Request Flow
 
 ```
-Signal message → signal.ts (SSE stream) → index.ts (handler) → tarsAgent.generate() → Mastra Agent → tool dispatch → response
+Channel message → ChannelPlugin.onMessage() → channelManager → processAgentMessage() → tarsAgent.generate() → Mastra Agent → tool dispatch → plugin.send() → response
 ```
 
-1. `src/signal.ts` spawns `signal-cli` as a subprocess in HTTP daemon mode, then connects to its SSE endpoint to receive messages. Responses are sent back via JSON-RPC POST.
-2. `src/index.ts` is the wiring layer: it initializes the DB, imports the Mastra agent, registers the message callback, and handles graceful shutdown.
-3. `src/mastra/agents/tars.ts` defines the Tars agent. `buildSystemPrompt()` reads from the database and returns either the bootstrap prompt or the full persona prompt. The agent uses Mastra's native Memory for conversation history and semantic recall.
-4. Markdown is stripped from responses (via `remove-markdown`) before being sent to Signal.
+1. Channel plugins (e.g., Signal) receive messages and invoke the `messageHandler` callback wired by `ChannelManager`.
+2. `src/mastra/service.ts` is the processing layer: `processAgentMessage()` handles typing indicators, agent generation, and response routing — all through the channel plugin interface.
+3. `src/index.ts` initializes the DB, loads channel plugins via `channelManager.loadPlugins()`, and handles graceful shutdown.
+4. `src/mastra/agents/tars.ts` defines the Tars agent. `buildSystemPrompt()` reads from the database and returns either the bootstrap prompt or the full persona prompt. The agent uses Mastra's native Memory for conversation history and semantic recall.
+5. Markdown is stripped from responses (via `remove-markdown`) before being sent to the originating channel.
 
 ### Database (`src/db.ts`)
 
@@ -114,15 +116,12 @@ See `.env.example`. Key ones:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `BOT_SIGNAL_NUMBER` | — | Required. E.164 format. |
-| `TARGET_SIGNAL_NUMBER` | — | Required. Whitelisted user. |
-| `TARGET_SIGNAL_GROUP` | — | Optional group name; if set, DMs from target number are ignored. |
 | `LLM_API_KEY` | — | Required. LLM API key. |
-| `LLM_API_MODEL` | `google/gemini-2.0-flash` | Provider/Model string to use. |
+| `LLM_API_MODEL` | `google/gemini-flash-latest` | Provider/Model string to use. |
 | `LLM_MAX_ITERATIONS` | `35` | Max agent loop steps per message. |
-| `SIGNAL_CLI_PORT` | `8080` | Port for the signal-cli HTTP daemon. |
 | `MCP_SERVER_COMMAND` | — | Optional STDIO MCP server to load tools from. |
 | `AGENT_PROMPTS_PATH` | `agent/` | Directory to seed agent context from on first run. |
+| `TARS_MARKETPLACE_URL` | GitHub raw URL | Plugin marketplace registry URL. |
 
 ## Important Notes
 
@@ -133,39 +132,42 @@ See `.env.example`. Key ones:
 - The `dist/` and `.mastra/` directories are build artifacts and should not be edited directly.
 
 ## Handoff
-Generated: 2026-02-22T17:41:45-07:00
+Generated: 2026-03-01T17:11:00-07:00
 
 ### Spec Reference
-The Tars project is a local-first AI agent using Mastra, running on Signal with a Gemini backend. Current efforts are focused on improving the agent's core capabilities, isolating bootstrapping logic, solidifying sandbox execution schemas, and adding reliable web search via Jina AI.
+The Tars project is a local-first AI agent using Mastra with a plugin-based channel architecture. Signal (and other messaging services) are installed as channel plugins from the `tars-plugins` marketplace. The core has no hardcoded messaging dependencies.
 
 ### Architecture Snapshot
-- `src/mastra/agents/tars.ts`: Main agent definition, now separated into `TarsAgent` and `BootstrapAgent`.
-- `src/index.ts`: Signal message handler and dynamic routing between agents.
-- `src/mastra/tools/`: Custom local tools including `search.ts` (Jina AI) and `execute.ts` (shell sandbox).
-- `src/mastra/workspace.ts`: Configures `LocalSandbox` boundaries for command execution.
+- `src/mastra/agents/tars.ts`: Main agent definition, separated into `TarsAgent` and `BootstrapAgent`.
+- `src/mastra/service.ts`: Channel-agnostic message processing — routes through `channelManager`.
+- `src/plugins/channel-manager.ts`: Loads, starts, and manages channel plugins. Wires message handlers and setup routes.
+- `src/plugins/marketplace.ts`: Fetches registry from `tars-plugins` repo, installs plugins via sparse checkout.
+- `src/plugins/types.ts`: Plugin interfaces including `ChannelPlugin`, `sendTyping`, `getSetupRoutes`.
+- `src/events.ts`: UI SSE event notifications.
+- `src/server.ts`: Dashboard API — marketplace endpoints, plugin management, chat mirror.
 
 ### Current State
-- **Working / complete:** `BootstrapAgent` memory isolation, Mastra workspace execution schema fixes, dynamic routing, Jina AI search & fetch tools.
-- **In progress:** Polishing core agent integration and custom tools.
-- **Blocked / known issues:** None.
+- **Working / complete:** Plugin system, marketplace infrastructure, Signal decoupled to plugin, service layer abstraction, wizard redesign with marketplace flow.
+- **In progress:** None.
+- **Blocked / known issues:** The `tars-plugins` GitHub repo needs to be created with `registry.json` and the Signal plugin files.
 
 ### Recent Changes
-- `src/mastra/agents/tars.ts`: Separated `TarsAgent` & `BootstrapAgent` to isolate memory initialization. Fixed missing telemetry in custom tools.
-- `src/index.ts`: Added dynamic routing to use the correct agent based on the `bootstrapped` state toggle.
-- `src/mastra/workspace.ts`: Extracted workspace initialization to solve dependency cycles. Configured specific CWD resolving for executed commands.
-- `src/mastra/tools/execute.ts`: Created `execute_command` explicitly to replace Mastra's built-in sandbox tool, solving Gemini schema failures.
-- `src/mastra/tools/search.ts`: Implemented `web_search` and `read_url` tools using `s.jina.ai` and `r.jina.ai` securely via `JINA_API_KEY`.
-- `.env`: Verified the `.env` configuration contains `JINA_API_KEY`.
-
-### Next Steps
-1. Verify the multi-agent bootstrapping flow works smoothly from scratch (`pnpm run clean`).
-2. Test new tools (`web_search`, `read_url`, `execute_command`) extensively in complex usage via Signal client or Dev Studio.
-3. Continue expanding Mastra agent capabilities or customizing system prompts.
+- Deleted `src/signal.ts` — all Signal functionality now lives in `public/.agents/plugins/signal/`.
+- Renamed `src/signal_events.ts` → `src/events.ts`.
+- Rewrote `src/mastra/service.ts` to route all communication through `channelManager` — no Signal imports.
+- Rewrote `src/index.ts` — removed Signal requirements, uses `channelManager.loadPlugins()`.
+- Rewrote `src/scheduler.ts` — broadcasts via `channelManager.getEnabledPlugins()`.
+- Created `src/plugins/marketplace.ts` — `fetchRegistry()`, `installPlugin()`, `listAvailable()`.
+- Updated `src/plugins/channel-manager.ts` — removed Signal hardcoding, added `mountPluginRoutes()`, wires global message handler automatically.
+- Updated Signal plugin — uses `this.messageHandler` callback instead of direct import, added `sendTyping()` and `getSetupRoutes()`.
+- Rewrote `src/ui/src/components/Wizard.tsx` — 3-step flow with marketplace plugin browser.
+- Updated `src/ui/src/components/Dashboard.tsx` — channel-based status, marketplace browse in Channels tab.
+- Updated `src/server.ts` — removed Signal endpoints, added marketplace endpoints, updated `/api/status`.
 
 ### Key Decisions & Context
-- **Jina AI:** Used seamlessly over a standard HTTP auth key for search/fetch instead of Playwright/SearXNG to maintain strict lightweight footprint.
+- **Plugin Architecture:** All channel communication flows through `ChannelManager`. Plugins implement `ChannelPlugin` interface with `send()`, `onMessage()`, and optional `sendTyping()` / `getSetupRoutes()`.
+- **Marketplace:** `tars-plugins` GitHub repo serves as the plugin registry. `registry.json` lists available plugins. Install uses git sparse checkout.
 - **Bootstrapping Isolation:** `BootstrapAgent` intentionally omits the `memory` argument in `.generate()` to prevent creating traces until identity is fully bootstrapped.
-- **Execute schema overload:** Mastra's built-in `mastra_workspace_execute_command` is disabled in the Workspace config. The replacement custom tool is named `execute_command` and enforces mandatory JSON schema arguments to prevent Gemini 2.0 crashes.
 
 ### Dev Environment
 - `pnpm` package manager

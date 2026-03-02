@@ -59,7 +59,8 @@ const markdownComponents = {
 export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
   const [activeTab, setActiveTab] = useState('chat');
   const [isRestarting, setIsRestarting] = useState(false);
-  const [isTogglingSignal, setIsTogglingSignal] = useState(false);
+  const [marketplacePlugins, setMarketplacePlugins] = useState<any[]>([]);
+  const [installingMarketplace, setInstallingMarketplace] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -386,51 +387,53 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
     }
   };
 
-  // --- Signal / Chat handlers ---
+  // --- Marketplace handlers ---
 
-  const handleToggleSignal = async () => {
-    setIsTogglingSignal(true);
-    const wasOnline = !!status?.signalOnline;
-    const endpoint = wasOnline ? '/api/signal/daemon/stop' : '/api/signal/daemon/start';
+  const fetchMarketplace = async () => {
     try {
-      const res = await fetch(endpoint, { method: 'POST' });
+      const res = await fetch('/api/marketplace/plugins');
+      if (res.ok) {
+        const data = await res.json();
+        setMarketplacePlugins(data.plugins || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch marketplace:', err);
+    }
+  };
+
+  const handleInstallMarketplace = async (pluginId: string) => {
+    setInstallingMarketplace(pluginId);
+    try {
+      const res = await fetch('/api/marketplace/install', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pluginId }),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setModal({
-          isOpen: true,
-          title: 'Signal Daemon Error',
-          message: data.error || `Request failed (${res.status})`,
-          confirmLabel: 'Close',
-          type: 'danger',
-          onConfirm: closeModal,
-        });
-        setIsTogglingSignal(false);
-        return;
+        throw new Error(data.error || 'Install failed');
       }
-      const deadline = Date.now() + 15000;
-      const pollUntilChanged = () => {
-        fetch('/api/status').then(r => r.json()).then(data => {
-          setStatus(data);
-          if (data.signalOnline !== wasOnline || Date.now() >= deadline) {
-            setIsTogglingSignal(false);
-          } else {
-            setTimeout(pollUntilChanged, 1500);
-          }
-        }).catch(() => {
-          setIsTogglingSignal(false);
-        });
-      };
-      setTimeout(pollUntilChanged, 1000);
+      await fetchChannels();
+      await fetchMarketplace();
+      setModal({
+        isOpen: true,
+        title: 'Plugin Installed',
+        message: `"${pluginId}" has been installed successfully.`,
+        confirmLabel: 'OK',
+        type: 'success',
+        onConfirm: closeModal,
+      });
     } catch (err) {
       setModal({
         isOpen: true,
-        title: 'Signal Daemon Error',
+        title: 'Install Failed',
         message: (err as Error).message,
         confirmLabel: 'Close',
         type: 'danger',
         onConfirm: closeModal,
       });
-      setIsTogglingSignal(false);
+    } finally {
+      setInstallingMarketplace(null);
     }
   };
 
@@ -473,7 +476,7 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
   // Refetch skills when switching to the skills tab
   useEffect(() => {
     if (activeTab === 'skills') fetchSkills();
-    if (activeTab === 'channels') fetchChannels();
+    if (activeTab === 'channels') { fetchChannels(); fetchMarketplace(); }
   }, [activeTab]);
 
   useEffect(scrollToBottom, [messages]);
@@ -813,25 +816,51 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
         Channels
       </h2>
 
-      {/* Install input */}
-      <div className="mb-6 flex gap-2">
-        <input
-          type="text"
-          placeholder="Install channel by GitHub URL..."
-          value={channelInstallInput}
-          onInput={(e) => setChannelInstallInput((e.target as HTMLInputElement).value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleInstallChannel(); }}
-          disabled={isInstalling}
-          className="flex-1 bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand/50 placeholder:text-gray-600 disabled:opacity-50"
-        />
-        <button
-          onClick={handleInstallChannel}
-          disabled={isInstalling || !channelInstallInput.trim()}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-green-400 bg-green-950/20 border-green-900/40 hover:bg-green-900/40`}
-        >
-          {isInstalling ? <SpinnerIcon /> : null}
-          {isInstalling ? 'Installing...' : 'Add'}
-        </button>
+      {/* Install inputs */}
+      <div className="mb-6 space-y-3">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            placeholder="Install channel by GitHub URL..."
+            value={channelInstallInput}
+            onInput={(e) => setChannelInstallInput((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleInstallChannel(); }}
+            disabled={isInstalling}
+            className="flex-1 bg-gray-800 border border-gray-700 text-gray-100 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand/50 placeholder:text-gray-600 disabled:opacity-50"
+          />
+          <button
+            onClick={handleInstallChannel}
+            disabled={isInstalling || !channelInstallInput.trim()}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-green-400 bg-green-950/20 border-green-900/40 hover:bg-green-900/40`}
+          >
+            {isInstalling ? <SpinnerIcon /> : null}
+            {isInstalling ? 'Installing...' : 'Add'}
+          </button>
+        </div>
+
+        {/* Marketplace plugins */}
+        {marketplacePlugins.filter(mp => !mp.installed).length > 0 && (
+          <div className="bg-brand/5 border border-brand/20 rounded-xl p-4">
+            <h3 className="text-xs font-bold text-brand uppercase tracking-widest mb-3">Marketplace</h3>
+            <div className="space-y-2">
+              {marketplacePlugins.filter(mp => !mp.installed).map(mp => (
+                <div key={mp.id} className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="block text-sm font-bold">{mp.name}</span>
+                    <span className="block text-xs text-gray-500">{mp.description}</span>
+                  </div>
+                  <button
+                    onClick={() => handleInstallMarketplace(mp.id)}
+                    disabled={installingMarketplace === mp.id}
+                    className="shrink-0 ml-3 px-3 py-1.5 text-xs rounded-lg font-bold text-green-400 bg-green-950/20 border border-green-900/40 hover:bg-green-900/40 disabled:opacity-50"
+                  >
+                    {installingMarketplace === mp.id ? 'Installing...' : 'Install'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Channels list */}
@@ -1020,7 +1049,7 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
                   <span className="text-[10px] font-bold uppercase tracking-wider">Live</span>
                 </div>
               </div>
-              <div className="text-[10px] text-gray-500 font-mono">{status?.targetNumber}</div>
+              <div className="text-[10px] text-gray-500 font-mono">{(status?.channels || []).filter((c: any) => c.online).length} channel(s) online</div>
             </div>
 
             <div className="flex-1 p-6 overflow-y-auto space-y-4 bg-black/20">
@@ -1101,7 +1130,7 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
                 <textarea
                   ref={textareaRef}
                   rows={1}
-                  placeholder={isSending ? "Tars is thinking..." : "Chat with your Signal bot from here..."}
+                  placeholder={isSending ? "Tars is thinking..." : "Chat with your agent from here..."}
                   className="flex-1 bg-transparent px-3 py-2 text-sm focus:outline-none placeholder:text-gray-600 resize-none overflow-hidden leading-5"
                   value={inputValue}
                   onInput={handleTextareaInput}
@@ -1150,16 +1179,16 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
             <div className="space-y-8 max-w-xl">
                <div className="grid grid-cols-1 gap-6">
                   <div className="group">
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 group-hover:text-brand transition-colors">Bot Number</label>
-                    <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-gray-100 font-mono shadow-inner">{status?.botNumber || 'Not set'}</div>
-                  </div>
-                  <div className="group">
-                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 group-hover:text-brand transition-colors">Authorized Number</label>
-                    <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-gray-100 font-mono shadow-inner">{status?.targetNumber || 'Not set'}</div>
-                  </div>
-                  <div className="group">
                     <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 group-hover:text-brand transition-colors">Bootstrap Timestamp</label>
                     <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-gray-400 font-mono text-xs shadow-inner">{status?.timestamp || 'Pending'}</div>
+                  </div>
+                  <div className="group">
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 group-hover:text-brand transition-colors">Active Channels</label>
+                    <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-gray-100 font-mono shadow-inner">
+                      {(status?.channels || []).length > 0
+                        ? (status.channels as any[]).map((ch: any) => ch.name).join(', ')
+                        : 'None'}
+                    </div>
                   </div>
                </div>
                <div className="bg-brand/5 border border-brand/20 p-4 rounded-xl">
@@ -1192,38 +1221,29 @@ export function Dashboard({ isBootstrapped }: { isBootstrapped: boolean }) {
                   <span className="text-[10px] font-black text-green-500 bg-green-950/40 px-3 py-1.5 rounded-lg border border-green-900/50 uppercase tracking-tighter">ONLINE</span>
                </div>
 
-               <div className="flex items-center justify-between p-5 bg-gray-800/30 rounded-2xl border border-gray-800 hover:border-gray-700 transition-colors">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-10 h-10 ${status?.signalOnline ? 'bg-green-500/10' : 'bg-red-500/10'} rounded-full flex items-center justify-center`}>
-                       <div className={`w-3 h-3 ${status?.signalOnline ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.6)]' : 'bg-red-500'} rounded-full animate-pulse`}></div>
+               {(status?.channels || []).map((ch: any) => (
+                 <div key={ch.id} className="flex items-center justify-between p-5 bg-gray-800/30 rounded-2xl border border-gray-800 hover:border-gray-700 transition-colors">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 ${ch.online ? 'bg-green-500/10' : 'bg-red-500/10'} rounded-full flex items-center justify-center`}>
+                         <div className={`w-3 h-3 ${ch.online ? 'bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.6)]' : 'bg-red-500'} rounded-full animate-pulse`}></div>
+                      </div>
+                      <div>
+                        <span className="block font-bold">{ch.name}</span>
+                        <span className="text-[10px] text-gray-500 font-mono">Status: {ch.online ? 'Online' : 'Offline'}</span>
+                      </div>
                     </div>
-                    <div>
-                      <span className="block font-bold">Signal Daemon</span>
-                      <span className="text-[10px] text-gray-500 font-mono">Status: {status?.signalOnline ? 'Responsive' : 'Unresponsive'}</span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={handleToggleSignal}
-                    disabled={isTogglingSignal}
-                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold border transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-                      status?.signalOnline
-                        ? 'text-red-400 bg-red-950/20 border-red-900/40 hover:bg-red-900/40'
-                        : 'text-green-400 bg-green-950/20 border-green-900/40 hover:bg-green-900/40'
-                    }`}
-                  >
-                    {isTogglingSignal ? (
-                      <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                    ) : (
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d={status?.signalOnline ? 'M6 18L18 6M6 6l12 12' : 'M5 12h14M12 5l7 7-7 7'} />
-                      </svg>
-                    )}
-                    {isTogglingSignal ? (status?.signalOnline ? 'Stopping...' : 'Starting...') : status?.signalOnline ? 'Stop' : 'Start'}
-                  </button>
-               </div>
+                    <span className={`text-[10px] font-black px-3 py-1.5 rounded-lg border uppercase tracking-tighter ${
+                      ch.online
+                        ? 'text-green-500 bg-green-950/40 border-green-900/50'
+                        : 'text-red-500 bg-red-950/40 border-red-900/50'
+                    }`}>
+                      {ch.online ? 'ONLINE' : 'OFFLINE'}
+                    </span>
+                 </div>
+               ))}
+               {(!status?.channels || status.channels.length === 0) && (
+                 <div className="text-center py-8 text-gray-500 text-sm">No channels installed.</div>
+               )}
             </div>
           </div>
         )}

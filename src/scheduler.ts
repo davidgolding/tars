@@ -1,33 +1,12 @@
 import dotenv from 'dotenv';
 import removeMd from 'remove-markdown';
-import { execSync } from 'node:child_process';
 import { initDb, getDueSchedules, updateSchedule, getAgentContext } from './db.js';
 import { getNextCronDate } from './cron.js';
+import { channelManager } from './plugins/channel-manager.js';
 
 dotenv.config();
 
-const BOT_SIGNAL_NUMBER = process.env.BOT_SIGNAL_NUMBER;
-const TARGET_SIGNAL_NUMBER = process.env.TARGET_SIGNAL_NUMBER;
-const TARGET_SIGNAL_GROUP = process.env.TARGET_SIGNAL_GROUP;
 const MAX_ITERATIONS = parseInt(process.env.LLM_MAX_ITERATIONS || '35', 10);
-
-function sendSignalDirect(message: string): void {
-    const args = ['-u', BOT_SIGNAL_NUMBER!, 'send', '-m', message];
-
-    if (TARGET_SIGNAL_GROUP) {
-        // For group sends, we need the group ID — but we only have the name.
-        // Fall back to DM if we can't resolve it. The group approach requires
-        // the signal-cli daemon for listGroups. Use DM for scheduler messages.
-        args.push(TARGET_SIGNAL_NUMBER!);
-    } else {
-        args.push(TARGET_SIGNAL_NUMBER!);
-    }
-
-    execSync(`signal-cli ${args.map(a => JSON.stringify(a)).join(' ')}`, {
-        encoding: 'utf-8',
-        timeout: 30_000,
-    });
-}
 
 function getAgentName(): string {
     const identity = getAgentContext('IDENTITY');
@@ -43,13 +22,29 @@ function getAgentName(): string {
     return 'Tars';
 }
 
-async function main() {
-    if (!BOT_SIGNAL_NUMBER || !TARGET_SIGNAL_NUMBER) {
-        console.error('[Scheduler] Missing BOT_SIGNAL_NUMBER or TARGET_SIGNAL_NUMBER.');
-        process.exit(1);
+async function broadcastMessage(message: string): Promise<void> {
+    const enabledPlugins = channelManager.getEnabledPlugins();
+    if (enabledPlugins.length === 0) {
+        console.warn('[Scheduler] No enabled channel plugins to broadcast to.');
+        return;
     }
 
+    for (const plugin of enabledPlugins) {
+        try {
+            // Send to the first configured recipient for each plugin
+            // Plugins handle their own recipient resolution
+            await plugin.send('broadcast', message);
+        } catch (err) {
+            console.error(`[Scheduler] Failed to send via ${plugin.id}:`, err);
+        }
+    }
+}
+
+async function main() {
     initDb();
+
+    // Load channel plugins for broadcasting
+    await channelManager.loadPlugins();
 
     const due = getDueSchedules();
     if (due.length === 0) {
@@ -75,15 +70,15 @@ async function main() {
             const name = getAgentName();
             response = `${name}: ${response}`;
 
-            sendSignalDirect(response);
+            await broadcastMessage(response);
             console.log(`[Scheduler] Sent result for "${schedule.name}".`);
         } catch (err) {
             console.error(`[Scheduler] Error executing "${schedule.name}":`, err);
             try {
                 const name = getAgentName();
-                sendSignalDirect(`${name}: [Scheduled task "${schedule.name}" failed: ${err instanceof Error ? err.message : String(err)}]`);
+                await broadcastMessage(`${name}: [Scheduled task "${schedule.name}" failed: ${err instanceof Error ? err.message : String(err)}]`);
             } catch {
-                // Best effort — if Signal send also fails, just log it
+                // Best effort
             }
         }
 

@@ -9,15 +9,14 @@ import dotenv from 'dotenv';
 import { spawn, exec } from 'child_process';
 import { z } from 'zod';
 import { getSetting, initDb, updateSetting, dbPath, getPluginConfig } from './db.js';
-import { uiEvents } from './signal_events.js';
-import { checkSignalStatus, startSignalListener, stopSignalListener } from './signal.js';
+import { uiEvents } from './events.js';
 import { processAgentMessage } from './mastra/service.js';
 import { channelManager } from './plugins/channel-manager.js';
+import { listAvailable, installPlugin } from './plugins/marketplace.js';
 import Database from 'better-sqlite3';
 
 dotenv.config();
 
-const phoneSchema = z.string().regex(/^\+\d{10,15}$/, "Must be an E.164 formatted phone number (e.g., +1234567890)");
 const chatSchema = z.object({ content: z.string().min(1).max(2000) });
 const pluginIdSchema = z.string().regex(/^[a-z0-9-]+$/, "Plugin ID must be lowercase alphanumeric with dashes");
 
@@ -25,8 +24,6 @@ const configSchema = z.object({
     name: z.string().min(1).optional(),
     apiKey: z.string().optional(),
     model: z.string().optional(),
-    botNumber: phoneSchema,
-    targetNumber: phoneSchema,
     promptsPath: z.string().optional(),
 });
 
@@ -73,15 +70,16 @@ async function createServer() {
     apiRouter.get('/status', async (req, res) => {
         try {
             const bootstrapped = getSetting('bootstrapped');
-            const botNumber = getSetting('BOT_SIGNAL_NUMBER') || process.env.BOT_SIGNAL_NUMBER;
-            const targetNumber = getSetting('TARGET_SIGNAL_NUMBER') || process.env.TARGET_SIGNAL_NUMBER;
-            const signalOnline = await checkSignalStatus();
+            const plugins = channelManager.listPlugins();
+            const channels = plugins.map(p => ({
+                id: p.id,
+                name: p.name,
+                online: channelManager.getPluginStatus(p.id).online,
+            }));
             res.json({
                 bootstrapped: !!bootstrapped,
                 timestamp: bootstrapped,
-                botNumber,
-                targetNumber,
-                signalOnline
+                channels,
             });
         } catch (err) {
             res.status(500).json({ error: (err as Error).message });
@@ -100,11 +98,8 @@ async function createServer() {
             let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
 
             const updates: Record<string, string | undefined> = {
-                'BOT_SIGNAL_NUMBER': config.botNumber,
-                'TARGET_SIGNAL_NUMBER': config.targetNumber,
                 'LLM_API_KEY': config.apiKey,
                 'LLM_API_MODEL': config.model || 'google/gemini-flash-latest',
-                'LLM_PROVIDER': config.apiKey ? 'gemini-api' : 'gemini-cli',
                 'AGENT_PROMPTS_PATH': config.promptsPath || 'agent/'
             };
 
@@ -139,64 +134,28 @@ async function createServer() {
         }
     });
 
-    apiRouter.get('/signal/link', (req, res) => {
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
+    // --- Marketplace endpoints ---
 
-        const signal = spawn('signal-cli', ['link', '-n', 'Tars-Dashboard']);
-
-        const heartbeat = setInterval(() => {
-            res.write(': heartbeat\n\n');
-        }, 15000);
-
-        const handleSignalOutput = (output: string) => {
-            const match = output.match(/sgnl:\/\/\S+/);
-            if (match) res.write(`data: ${JSON.stringify({ type: 'uri', value: match[0] })}\n\n`);
-            if (output.includes('Device linked')) res.write(`data: ${JSON.stringify({ type: 'success' })}\n\n`);
-        };
-
-        signal.stdout.on('data', (data) => handleSignalOutput(data.toString()));
-        signal.stderr.on('data', (data) => handleSignalOutput(data.toString()));
-
-        signal.on('close', (code) => {
-            clearInterval(heartbeat);
-            if (code === 0) {
-                res.write(`data: ${JSON.stringify({ type: 'success' })}\n\n`);
-            } else {
-                res.write(`data: ${JSON.stringify({ type: 'error', code })}\n\n`);
-            }
-            res.end();
-        });
-
-        req.on('close', () => {
-            signal.kill();
-            clearInterval(heartbeat);
-        });
-    });
-
-    apiRouter.post('/signal/daemon/start', async (req, res) => {
-        // Re-read .env so values written by the wizard during this session are visible
-        dotenv.config({ override: true });
-        const botNumber = getSetting('BOT_SIGNAL_NUMBER') || process.env.BOT_SIGNAL_NUMBER;
-        const targetNumber = getSetting('TARGET_SIGNAL_NUMBER') || process.env.TARGET_SIGNAL_NUMBER;
-        const targetGroup = process.env.TARGET_SIGNAL_GROUP;
-
-        if (!botNumber || !targetNumber) {
-            return res.status(400).json({ error: 'BOT_SIGNAL_NUMBER and TARGET_SIGNAL_NUMBER must be configured.' });
-        }
-
-        res.json({ success: true });
-
-        startSignalListener(botNumber, targetNumber, targetGroup, async (text, sender, groupId) => {
-            await processAgentMessage({ text, sender, groupId, origin: 'signal' });
-        }).catch(err => console.error('[Signal] Daemon start failed:', err));
-    });
-
-    apiRouter.post('/signal/daemon/stop', async (req, res) => {
+    apiRouter.get('/marketplace/plugins', async (req, res) => {
         try {
-            await stopSignalListener();
-            res.json({ success: true });
+            const plugins = await listAvailable();
+            res.json({ plugins });
+        } catch (err) {
+            res.status(500).json({ error: (err as Error).message });
+        }
+    });
+
+    apiRouter.post('/marketplace/install', requirePluginAuth, async (req, res) => {
+        try {
+            const { pluginId } = req.body;
+            if (!pluginId || typeof pluginId !== 'string') {
+                return res.status(400).json({ error: 'pluginId is required' });
+            }
+
+            await installPlugin(pluginId);
+            await channelManager.loadPlugins();
+
+            res.json({ success: true, pluginId });
         } catch (err) {
             res.status(500).json({ error: (err as Error).message });
         }
@@ -215,18 +174,12 @@ async function createServer() {
     apiRouter.post('/chat/send', async (req, res) => {
         try {
             const { content } = chatSchema.parse(req.body);
-            const targetNumber = getSetting('TARGET_SIGNAL_NUMBER') || process.env.TARGET_SIGNAL_NUMBER;
 
-            if (!targetNumber) {
-                return res.status(400).json({ error: 'Target number not configured' });
-            }
-
-            // We process this asynchronously so the API can return quickly, 
-            // the UI will get updates via SSE
+            // Process asynchronously; UI gets updates via SSE
             processAgentMessage({
                 text: content,
-                sender: targetNumber,
-                origin: 'ui'
+                sender: 'ui-user',
+                channelId: 'ui',
             }).catch(err => {
                 console.error('[API] Error in background message processing:', err);
             });
@@ -711,9 +664,10 @@ async function createServer() {
         }
     });
 
-    // Load channel plugins
+    // Load channel plugins and mount their setup routes
     console.log('[Tars UI] Loading channel plugins...');
     await channelManager.loadPlugins();
+    channelManager.mountPluginRoutes(apiRouter);
 
     app.listen(PORT, () => {
         console.log(`[Tars UI] Server running at http://localhost:${PORT}`);

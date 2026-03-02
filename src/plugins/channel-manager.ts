@@ -33,7 +33,7 @@ export class ChannelManager {
 
   async loadPlugins(): Promise<void> {
     const pluginDirs = this.getPluginDirectories();
-    
+
     for (const dir of pluginDirs) {
       await this.loadPluginFromDirectory(dir);
     }
@@ -44,7 +44,7 @@ export class ChannelManager {
     if (!fs.existsSync(baseDir)) {
       return [];
     }
-    
+
     return fs.readdirSync(baseDir, { withFileTypes: true })
       .filter(dirent => dirent.isDirectory())
       .map(dirent => join(baseDir, dirent.name));
@@ -52,9 +52,15 @@ export class ChannelManager {
 
   private async loadPluginFromDirectory(dirPath: string): Promise<void> {
     const pluginName = dirPath.split('/').pop() || '';
+
+    // Skip if already loaded
+    if (this.plugins.has(pluginName)) {
+      return;
+    }
+
     const indexPath = join(dirPath, 'index.ts');
     const manifestPath = join(dirPath, 'manifest.json');
-    
+
     if (!fs.existsSync(indexPath)) {
       console.warn(`[ChannelManager] No index.ts found in ${pluginName}, skipping`);
       return;
@@ -84,7 +90,7 @@ export class ChannelManager {
       const moduleUrl = pathToFileURL(indexPath).href;
       const module = await import(moduleUrl);
       const PluginClass = module.default || module.ChannelPlugin || module.SignalChannelPlugin;
-      
+
       if (!PluginClass || typeof PluginClass !== 'function') {
         throw new Error(`Invalid plugin at ${indexPath}: no valid ChannelPlugin export`);
       }
@@ -99,9 +105,29 @@ export class ChannelManager {
 
       this.plugins.set(manifest.id, { instance, config });
 
+      // Wire up global message handler
+      instance.onMessage(async (payload) => {
+        const { processAgentMessage } = await import('../mastra/service.js');
+        await processAgentMessage({
+          text: payload.text,
+          sender: payload.sender,
+          channelId: payload.channelId,
+          metadata: payload.metadata,
+        });
+      });
+
+      // Auto-start if the plugin has sufficient config and is enabled (or has env fallbacks)
       const dbPlugin = getPlugin(manifest.id);
-      if (dbPlugin && dbPlugin.enabled) {
-        await this.startPlugin(manifest.id);
+      const hasConfig = Object.keys(config).length > 0;
+      if ((dbPlugin && dbPlugin.enabled) || hasConfig) {
+        try {
+          await this.startPlugin(manifest.id);
+          if (!dbPlugin || !dbPlugin.enabled) {
+            updatePlugin(manifest.id, { enabled: 1 });
+          }
+        } catch (err) {
+          console.error(`[ChannelManager] Auto-start failed for ${manifest.id}:`, err);
+        }
       }
 
       console.log(`[ChannelManager] Loaded plugin: ${manifest.name}`);
@@ -156,10 +182,27 @@ export class ChannelManager {
 
   registerMessageHandler(pluginId: string, handler: MessageHandler): void {
     this.messageHandlers.set(pluginId, handler);
-    
+
     const loaded = this.plugins.get(pluginId);
     if (loaded) {
       loaded.instance.onMessage(handler);
+    }
+  }
+
+  mountPluginRoutes(router: any): void {
+    for (const [id, loaded] of this.plugins) {
+      const routes = loaded.instance.getSetupRoutes?.();
+      if (!routes || routes.length === 0) continue;
+
+      for (const route of routes) {
+        const fullPath = `/plugins/${id}/setup${route.path}`;
+        if (route.method === 'get') {
+          router.get(fullPath, route.handler);
+        } else {
+          router.post(fullPath, route.handler);
+        }
+        console.log(`[ChannelManager] Mounted setup route: ${route.method.toUpperCase()} /api${fullPath}`);
+      }
     }
   }
 
